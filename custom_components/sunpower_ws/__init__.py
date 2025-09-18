@@ -46,11 +46,12 @@ FIELD_MAP = {
 class SunPowerWSHub:
     """WebSocket client + optional low-rate DeviceList poller."""
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, poll_interval: int):
+    def __init__(self, hass: HomeAssistant, host: str, port: int, poll_interval: int, enable_devicelist_scan: bool):
         self.hass = hass
         self.host = host
         self.port = port
         self.poll_interval = max(60, int(poll_interval or DEFAULT_POLL_INTERVAL))
+        self.enable_devicelist_scan = enable_devicelist_scan
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._listeners: list[Callable[[dict], None]] = []
@@ -71,7 +72,8 @@ class SunPowerWSHub:
         self._session = aiohttp.ClientSession()
         self._task = self.hass.async_create_task(self._runner())
         # Start lightweight DeviceList poller for lifetime/panels
-        self._poll_task = self.hass.async_create_task(self._devicelist_poller())
+        if self.enable_devicelist_scan:
+            self._poll_task = self.hass.async_create_task(self._devicelist_poller())
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_hass_stop)
 
     async def async_stop(self) -> None:
@@ -281,7 +283,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data.get("host", DEFAULT_HOST)
     port = entry.data.get("port", DEFAULT_PORT)
     poll_interval = entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)
-    hub = SunPowerWSHub(hass, host, port, poll_interval)
+    enable_devicelist_scan = entry.data.get("enable_devicelist_scan", True)
+    hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan)
     hass.data.setdefault(DOMAIN, {})["hub"] = hub
     await hub.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

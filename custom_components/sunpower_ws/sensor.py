@@ -15,7 +15,6 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfElectricPotential,
     UnitOfElectricCurrent,
-    POWER_KILO_WATT,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
@@ -25,9 +24,9 @@ from . import DOMAIN, get_hub, SunPowerWSHub
 
 # Primary power sensors in kW
 KW_SENSORS = {
-    "pv_kw":   ("sunpower_pv_power_kw",   "PV Power",   POWER_KILO_WATT, SensorDeviceClass.POWER),
-    "load_kw": ("sunpower_home_load_kw",  "Home Load",  POWER_KILO_WATT, SensorDeviceClass.POWER),
-    "net_kw":  ("sunpower_grid_net_kw",   "Grid Net",   POWER_KILO_WATT, SensorDeviceClass.POWER),
+    "pv_kw":   ("sunpower_pv_power_kw",   "PV Power",   UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
+    "load_kw": ("sunpower_home_load_kw",  "Home Load",  UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
+    "net_kw":  ("sunpower_grid_net_kw",   "Grid Net",   UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
 }
 
 # Legacy W sensors (optionally enabled via Options)
@@ -79,14 +78,16 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     entities.append(GridSplitEnergySensor(hub, "import"))
     entities.append(GridSplitEnergySensor(hub, "export"))
 
-    # Site lifetime from DeviceList
-    entities.append(SiteLifetimeEnergySensor(hub))
+    # Site lifetime from DeviceList (optional)
+    if getattr(hub, "enable_devicelist_scan", True):
+        entities.append(SiteLifetimeEnergySensor(hub))
 
     async_add_entities(entities)
 
-    # Dynamic per-inverter from DeviceList
-    manager = InverterEntityManager(hub, async_add_entities)
-    manager.start()
+    # Dynamic per-inverter from DeviceList (optional)
+    if getattr(hub, "enable_devicelist_scan", True):
+        manager = InverterEntityManager(hub, async_add_entities)
+        manager.start()
 
 
 class GenericLiveSensor(SensorEntity):
@@ -123,7 +124,7 @@ class GenericLiveSensor(SensorEntity):
 class GridSplitPowerSensor(SensorEntity):
     _attr_should_poll = False
     _attr_device_class = SensorDeviceClass.POWER
-    _attr_native_unit_of_measurement = POWER_KILO_WATT
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
 
     def __init__(self, hub: SunPowerWSHub, mode: str):
         assert mode in ("import", "export")

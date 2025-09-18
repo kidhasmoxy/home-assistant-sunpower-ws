@@ -20,6 +20,7 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({
             vol.Optional("host", default=DEFAULT_HOST): str,
             vol.Optional("port", default=DEFAULT_PORT): int,
+            vol.Optional("enable_devicelist_scan", default=True): bool,
             vol.Optional("poll_interval", default=DEFAULT_POLL_INTERVAL): int,
         })
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -37,6 +38,7 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
             data = dict(self.config_entry.data)
             data["poll_interval"] = max(60, int(user_input.get("poll_interval", data.get("poll_interval", DEFAULT_POLL_INTERVAL))))
             data["enable_w_sensors"] = bool(user_input.get("enable_w_sensors", False))
+            data["enable_devicelist_scan"] = bool(user_input.get("enable_devicelist_scan", True))
             self.hass.config_entries.async_update_entry(self.config_entry, data=data)
             return self.async_create_entry(title="", data={})
 
@@ -44,6 +46,7 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
         schema = vol.Schema({
             vol.Optional("poll_interval", default=data.get("poll_interval", DEFAULT_POLL_INTERVAL)): int,
             vol.Optional("enable_w_sensors", default=data.get("enable_w_sensors", False)): bool,
+            vol.Optional("enable_devicelist_scan", default=data.get("enable_devicelist_scan", True)): bool,
         })
         return self.async_show_form(step_id="init", data_schema=schema)
 
