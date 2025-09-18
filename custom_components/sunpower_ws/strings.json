@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SunPower PVS WebSocket",
+        "description": "Connect to your local PVS WebSocket feed.",
+        "data": {
+          "host": "Host (PVS IP)",
+          "port": "Port",
+          "poll_interval": "DeviceList poll interval (seconds, optional)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This SunPower PVS is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SunPower PVS Options",
+        "data": {
+          "poll_interval": "DeviceList poll interval (seconds, min 60)",
+          "enable_w_sensors": "Enable legacy W sensors (disabled by default)"
+        }
+      }
+    }
+  }
+}
