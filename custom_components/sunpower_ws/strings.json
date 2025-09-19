@@ -7,7 +7,18 @@
         "data": {
           "host": "Host (PVS IP)",
           "port": "Port",
-          "poll_interval": "DeviceList poll interval (seconds, optional)"
+          "enable_devicelist_scan": "Enable DeviceList scan (lifetime & inverter details)",
+          "consumption_measure": "Consumption measure semantics",
+          "ws_update_interval": "WebSocket publish interval (seconds)",
+          "enable_ws_throttle": "Throttle WS updates to reduce DB writes",
+          "poll_interval": "DeviceList poll interval (seconds, min 60)"
+        },
+        "data_description": {
+          "enable_devicelist_scan": "When enabled, periodically queries DeviceList over HTTP to fetch lifetime energy and per-inverter metrics.",
+          "consumption_measure": "Choose how the 'consumption' value from your PVS should be interpreted: House usage (load) or Grid import.",
+          "ws_update_interval": "Minimum time between state publishes for WS-driven sensors. Increases this to reduce database writes.",
+          "enable_ws_throttle": "If enabled, entities will only publish state at the configured interval. Disable to publish every WS message.",
+          "poll_interval": "How often to poll DeviceList (in seconds). Must be at least 60 seconds. Set higher to reduce load."
         }
       }
     },
@@ -21,7 +32,18 @@
         "title": "SunPower PVS Options",
         "data": {
           "poll_interval": "DeviceList poll interval (seconds, min 60)",
-          "enable_w_sensors": "Enable legacy W sensors (disabled by default)"
+          "enable_w_sensors": "Enable legacy W sensors (disabled by default)",
+          "enable_devicelist_scan": "Enable DeviceList scan (lifetime & inverter details)",
+          "consumption_measure": "Consumption measure semantics",
+          "ws_update_interval": "WebSocket publish interval (seconds)",
+          "enable_ws_throttle": "Throttle WS updates to reduce DB writes"
+        },
+        "data_description": {
+          "enable_devicelist_scan": "When enabled, periodically queries DeviceList over HTTP to fetch lifetime energy and per-inverter metrics.",
+          "consumption_measure": "Interpretation of 'consumption' from PVS: House usage (load) or Grid import.",
+          "ws_update_interval": "Minimum time between state publishes for WS-driven sensors. Increase to reduce recorder writes.",
+          "enable_ws_throttle": "Enable to limit state publishing cadence. Disable to publish every WS message.",
+          "poll_interval": "How often to poll DeviceList. Higher values reduce load."
         }
       }
     }

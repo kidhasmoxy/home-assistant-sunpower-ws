@@ -47,13 +47,15 @@ FIELD_MAP = {
 class SunPowerWSHub:
     """WebSocket client + optional low-rate DeviceList poller."""
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, poll_interval: int, enable_devicelist_scan: bool, ws_update_interval: int):
+    def __init__(self, hass: HomeAssistant, host: str, port: int, poll_interval: int, enable_devicelist_scan: bool, ws_update_interval: int, consumption_measure: str, enable_ws_throttle: bool):
         self.hass = hass
         self.host = host
         self.port = port
         self.poll_interval = max(60, int(poll_interval or DEFAULT_POLL_INTERVAL))
         self.enable_devicelist_scan = enable_devicelist_scan
         self.ws_update_interval = max(1, int(ws_update_interval or DEFAULT_WS_UPDATE_INTERVAL))
+        self.consumption_measure = consumption_measure or "house_usage"
+        self.enable_ws_throttle = bool(enable_ws_throttle)
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._listeners: list[Callable[[dict], None]] = []
@@ -252,13 +254,19 @@ class SunPowerWSHub:
         if "net_kw" in result and "net_w" not in result:
             vw = kw_to_w(result["net_kw"]);  result["net_w"] = vw if vw is not None else result.get("net_w")
 
-        # Compute net if missing
+        # Compute net if missing, based on configured consumption measure
         if "net_kw" not in result:
-            if "pv_kw" in result and "load_kw" in result:
-                try:
-                    result["net_kw"] = float(result["load_kw"]) - float(result["pv_kw"])
-                except Exception:
-                    pass
+            try:
+                cmode = getattr(self, "consumption_measure", "house_usage")
+                if cmode == "house_usage":
+                    if "pv_kw" in result and "load_kw" in result:
+                        result["net_kw"] = float(result["load_kw"]) - float(result["pv_kw"])  # + = import, - = export
+                elif cmode == "grid_import":
+                    if "load_kw" in result:
+                        # Treat provided load as grid import (+ import). Export cannot be derived without signed grid value.
+                        result["net_kw"] = float(result["load_kw"])  # non-negative import magnitude
+            except Exception:
+                pass
 
         # Normalize numeric types
         for k in list(result.keys()):
@@ -287,7 +295,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     poll_interval = entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)
     enable_devicelist_scan = entry.data.get("enable_devicelist_scan", True)
     ws_update_interval = entry.data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
-    hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan, ws_update_interval)
+    consumption_measure = entry.data.get("consumption_measure", "house_usage")
+    enable_ws_throttle = entry.data.get("enable_ws_throttle", True)
+    hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan, ws_update_interval, consumption_measure, enable_ws_throttle)
     hass.data.setdefault(DOMAIN, {})["hub"] = hub
     await hub.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

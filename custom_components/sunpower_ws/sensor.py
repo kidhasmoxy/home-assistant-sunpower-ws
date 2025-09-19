@@ -110,7 +110,9 @@ class GenericLiveSensor(SensorEntity):
             if self._key in data and isinstance(data[self._key], (int, float)):
                 self._attr_native_value = float(data[self._key])
                 now = time.time()
-                if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                if (not getattr(self._hub, "enable_ws_throttle", True)) or (
+                    (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1)
+                ):
                     self._last_publish_ts = now
                     self.async_write_ha_state()
         self._hub.add_listener(_listener)
@@ -149,7 +151,9 @@ class GridSplitPowerSensor(SensorEntity):
                 else:
                     self._attr_native_value = max(-float(p), 0.0)
                 now = time.time()
-                if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                if (not getattr(self._hub, "enable_ws_throttle", True)) or (
+                    (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1)
+                ):
                     self._last_publish_ts = now
                     self.async_write_ha_state()
         self._hub.add_listener(_listener)
@@ -233,7 +237,9 @@ class IntegratingEnergySensor(RestoreEntity, SensorEntity):
                         kwh = (self._last_kw + float(p)) / 2.0 * (dt / 3600.0)
                         if kwh > 0:
                             self._attr_native_value = (self._attr_native_value or 0.0) + kwh
-                            if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                            if (not getattr(self._hub, "enable_ws_throttle", True)) or (
+                                (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1)
+                            ):
                                 self._last_publish_ts = now
                                 self.async_write_ha_state()
                 self._last_ts = now
@@ -287,7 +293,9 @@ class GridSplitEnergySensor(IntegratingEnergySensor):
                         kwh = (self._last_kw + val) / 2.0 * (dt / 3600.0)
                         if kwh > 0:
                             self._attr_native_value = (self._attr_native_value or 0.0) + kwh
-                            if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                            if (not getattr(self._hub, "enable_ws_throttle", True)) or (
+                                (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1)
+                            ):
                                 self._last_publish_ts = now
                                 self.async_write_ha_state()
                 self._last_ts = now
