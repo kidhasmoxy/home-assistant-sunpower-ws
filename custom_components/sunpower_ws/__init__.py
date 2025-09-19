@@ -254,19 +254,20 @@ class SunPowerWSHub:
         if "net_kw" in result and "net_w" not in result:
             vw = kw_to_w(result["net_kw"]);  result["net_w"] = vw if vw is not None else result.get("net_w")
 
-        # Compute net if missing, based on configured consumption measure
-        if "net_kw" not in result:
-            try:
-                cmode = getattr(self, "consumption_measure", "house_usage")
-                if cmode == "house_usage":
-                    if "pv_kw" in result and "load_kw" in result:
-                        result["net_kw"] = float(result["load_kw"]) - float(result["pv_kw"])  # + = import, - = export
-                elif cmode == "grid_import":
-                    if "load_kw" in result:
-                        # Treat provided load as grid import (+ import). Export cannot be derived without signed grid value.
-                        result["net_kw"] = float(result["load_kw"])  # non-negative import magnitude
-            except Exception:
-                pass
+        # Compute/override net based on configured consumption measure
+        try:
+            cmode = getattr(self, "consumption_measure", "house_usage")
+            if cmode == "house_usage":
+                # Always derive net from house load and PV if both are available.
+                # Convention: net_kw = load_kw - pv_kw  (positive = grid import, negative = grid export)
+                if "pv_kw" in result and "load_kw" in result:
+                    result["net_kw"] = float(result["load_kw"]) - float(result["pv_kw"])  # override any provided net
+            elif cmode == "grid_import":
+                # If the device did not provide a signed net, fallback to using load as import magnitude.
+                if "net_kw" not in result and "load_kw" in result:
+                    result["net_kw"] = float(result["load_kw"])  # non-negative import magnitude
+        except Exception:
+            pass
 
         # Normalize numeric types
         for k in list(result.keys()):

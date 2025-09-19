@@ -41,6 +41,49 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_import(self, user_input=None) -> FlowResult:
         return await self.async_step_user(user_input)
 
+    async def async_step_reconfigure(self, user_input=None) -> FlowResult:
+        entry_id = self.context.get("entry_id")
+        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        if entry is None:
+            return self.async_abort(reason="unknown")
+
+        current = {**entry.data, **entry.options}
+        if user_input is not None:
+            options = {
+                "host": user_input.get("host", current.get("host")),
+                "port": int(user_input.get("port", current.get("port", DEFAULT_PORT))),
+                "poll_interval": max(60, int(user_input.get("poll_interval", current.get("poll_interval", DEFAULT_POLL_INTERVAL)))),
+                "enable_w_sensors": bool(user_input.get("enable_w_sensors", current.get("enable_w_sensors", False))),
+                "enable_devicelist_scan": bool(user_input.get("enable_devicelist_scan", current.get("enable_devicelist_scan", True))),
+                "consumption_measure": user_input.get("consumption_measure", current.get("consumption_measure", "house_usage")),
+                "ws_update_interval": max(1, int(user_input.get("ws_update_interval", current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)))),
+                "enable_ws_throttle": bool(user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))),
+            }
+            self.hass.config_entries.async_update_entry(entry, options=options)
+            await self.hass.config_entries.async_reload(entry.entry_id)
+            return self.async_create_entry(title="", data={})
+
+        schema = vol.Schema({
+            vol.Optional("host", default=current.get("host", DEFAULT_HOST)): str,
+            vol.Optional("port", default=current.get("port", DEFAULT_PORT)): int,
+            vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL)): int,
+            vol.Optional("enable_w_sensors", default=current.get("enable_w_sensors", False)): bool,
+            vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True)): bool,
+            vol.Optional("consumption_measure", default=current.get("consumption_measure", "house_usage")): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"label": "House usage (load)", "value": "house_usage"},
+                        {"label": "Grid import (from utility)", "value": "grid_import"},
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    multiple=False,
+                )
+            ),
+            vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)): int,
+            vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True)): bool,
+        })
+        return self.async_show_form(step_id="reconfigure", data_schema=schema)
+
 
 class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, config_entry):
@@ -83,6 +126,8 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional("enable_ws_throttle", default=data.get("enable_ws_throttle", True)): bool,
         })
         return self.async_show_form(step_id="init", data_schema=schema)
+
+
 
 
 async def async_get_options_flow(config_entry):
