@@ -48,18 +48,24 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
-            data = dict(self.config_entry.data)
-            data["poll_interval"] = max(60, int(user_input.get("poll_interval", data.get("poll_interval", DEFAULT_POLL_INTERVAL))))
-            data["enable_w_sensors"] = bool(user_input.get("enable_w_sensors", False))
-            data["enable_devicelist_scan"] = bool(user_input.get("enable_devicelist_scan", True))
-            data["consumption_measure"] = user_input.get("consumption_measure", data.get("consumption_measure", "house_usage"))
-            data["ws_update_interval"] = max(1, int(user_input.get("ws_update_interval", data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))))
-            data["enable_ws_throttle"] = bool(user_input.get("enable_ws_throttle", data.get("enable_ws_throttle", True)))
-            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
+            current = {**self.config_entry.data, **self.config_entry.options}
+            options = {
+                "host": user_input.get("host", current.get("host")),
+                "port": int(user_input.get("port", current.get("port", DEFAULT_PORT))),
+                "poll_interval": max(60, int(user_input.get("poll_interval", current.get("poll_interval", DEFAULT_POLL_INTERVAL)))),
+                "enable_w_sensors": bool(user_input.get("enable_w_sensors", current.get("enable_w_sensors", False))),
+                "enable_devicelist_scan": bool(user_input.get("enable_devicelist_scan", current.get("enable_devicelist_scan", True))),
+                "consumption_measure": user_input.get("consumption_measure", current.get("consumption_measure", "house_usage")),
+                "ws_update_interval": max(1, int(user_input.get("ws_update_interval", current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)))),
+                "enable_ws_throttle": bool(user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))),
+            }
+            self.hass.config_entries.async_update_entry(self.config_entry, options=options)
             return self.async_create_entry(title="", data={})
 
-        data = self.config_entry.data
+        data = {**self.config_entry.data, **self.config_entry.options}
         schema = vol.Schema({
+            vol.Optional("host", default=data.get("host", DEFAULT_HOST)): str,
+            vol.Optional("port", default=data.get("port", DEFAULT_PORT)): int,
             vol.Optional("poll_interval", default=data.get("poll_interval", DEFAULT_POLL_INTERVAL)): int,
             vol.Optional("enable_w_sensors", default=data.get("enable_w_sensors", False)): bool,
             vol.Optional("enable_devicelist_scan", default=data.get("enable_devicelist_scan", True)): bool,

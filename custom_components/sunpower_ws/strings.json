@@ -31,6 +31,8 @@
       "init": {
         "title": "SunPower PVS Options",
         "data": {
+          "host": "Host (PVS IP)",
+          "port": "Port",
           "poll_interval": "DeviceList poll interval (seconds, min 60)",
           "enable_w_sensors": "Enable legacy W sensors (disabled by default)",
           "enable_devicelist_scan": "Enable DeviceList scan (lifetime & inverter details)",
@@ -39,6 +41,8 @@
           "enable_ws_throttle": "Throttle WS updates to reduce DB writes"
         },
         "data_description": {
+          "host": "IP address of your PVS (e.g., 172.27.x.x).",
+          "port": "WebSocket port (default 9002).",
           "enable_devicelist_scan": "When enabled, periodically queries DeviceList over HTTP to fetch lifetime energy and per-inverter metrics.",
           "consumption_measure": "Interpretation of 'consumption' from PVS: House usage (load) or Grid import.",
           "ws_update_interval": "Minimum time between state publishes for WS-driven sensors. Increase to reduce recorder writes.",

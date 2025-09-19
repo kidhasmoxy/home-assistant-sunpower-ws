@@ -290,17 +290,20 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    host = entry.data.get("host", DEFAULT_HOST)
-    port = entry.data.get("port", DEFAULT_PORT)
-    poll_interval = entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)
-    enable_devicelist_scan = entry.data.get("enable_devicelist_scan", True)
-    ws_update_interval = entry.data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
-    consumption_measure = entry.data.get("consumption_measure", "house_usage")
-    enable_ws_throttle = entry.data.get("enable_ws_throttle", True)
+    cfg = {**entry.data, **entry.options}
+    host = cfg.get("host", DEFAULT_HOST)
+    port = cfg.get("port", DEFAULT_PORT)
+    poll_interval = cfg.get("poll_interval", DEFAULT_POLL_INTERVAL)
+    enable_devicelist_scan = cfg.get("enable_devicelist_scan", True)
+    ws_update_interval = cfg.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
+    consumption_measure = cfg.get("consumption_measure", "house_usage")
+    enable_ws_throttle = cfg.get("enable_ws_throttle", True)
     hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan, ws_update_interval, consumption_measure, enable_ws_throttle)
     hass.data.setdefault(DOMAIN, {})["hub"] = hub
     await hub.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Reload integration when options change
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
@@ -315,3 +318,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 @callback
 def get_hub(hass: HomeAssistant) -> SunPowerWSHub | None:
     return hass.data.get(DOMAIN, {}).get("hub")
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update by reloading the config entry."""
+    await hass.config_entries.async_reload(entry.entry_id)
