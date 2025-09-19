@@ -5,7 +5,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
-from . import DOMAIN, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_POLL_INTERVAL
+from . import DOMAIN, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_POLL_INTERVAL, DEFAULT_WS_UPDATE_INTERVAL
 
 class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
@@ -21,6 +21,7 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional("host", default=DEFAULT_HOST): str,
             vol.Optional("port", default=DEFAULT_PORT): int,
             vol.Optional("enable_devicelist_scan", default=True): bool,
+            vol.Optional("ws_update_interval", default=DEFAULT_WS_UPDATE_INTERVAL): int,
             vol.Optional("poll_interval", default=DEFAULT_POLL_INTERVAL): int,
         })
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -39,6 +40,7 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
             data["poll_interval"] = max(60, int(user_input.get("poll_interval", data.get("poll_interval", DEFAULT_POLL_INTERVAL))))
             data["enable_w_sensors"] = bool(user_input.get("enable_w_sensors", False))
             data["enable_devicelist_scan"] = bool(user_input.get("enable_devicelist_scan", True))
+            data["ws_update_interval"] = max(1, int(user_input.get("ws_update_interval", data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))))
             self.hass.config_entries.async_update_entry(self.config_entry, data=data)
             return self.async_create_entry(title="", data={})
 
@@ -47,6 +49,7 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional("poll_interval", default=data.get("poll_interval", DEFAULT_POLL_INTERVAL)): int,
             vol.Optional("enable_w_sensors", default=data.get("enable_w_sensors", False)): bool,
             vol.Optional("enable_devicelist_scan", default=data.get("enable_devicelist_scan", True)): bool,
+            vol.Optional("ws_update_interval", default=data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)): int,
         })
         return self.async_show_form(step_id="init", data_schema=schema)
 

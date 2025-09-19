@@ -102,13 +102,17 @@ class GenericLiveSensor(SensorEntity):
         self._attr_device_class = device_class
         self._attr_native_value = None
         self._attr_entity_registry_enabled_default = enabled_by_default
+        self._last_publish_ts: float = 0.0
 
     async def async_added_to_hass(self):
         @callback
         def _listener(data: dict):
             if self._key in data and isinstance(data[self._key], (int, float)):
                 self._attr_native_value = float(data[self._key])
-                self.async_write_ha_state()
+                now = time.time()
+                if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                    self._last_publish_ts = now
+                    self.async_write_ha_state()
         self._hub.add_listener(_listener)
 
     @property
@@ -133,6 +137,7 @@ class GridSplitPowerSensor(SensorEntity):
         self._attr_name = f"Grid {'Import' if mode=='import' else 'Export'} (kW)"
         self._attr_unique_id = f"{DOMAIN}_grid_{mode}_kw"
         self._attr_native_value = 0.0
+        self._last_publish_ts: float = 0.0
 
     async def async_added_to_hass(self):
         @callback
@@ -143,7 +148,10 @@ class GridSplitPowerSensor(SensorEntity):
                     self._attr_native_value = max(float(p), 0.0)
                 else:
                     self._attr_native_value = max(-float(p), 0.0)
-                self.async_write_ha_state()
+                now = time.time()
+                if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                    self._last_publish_ts = now
+                    self.async_write_ha_state()
         self._hub.add_listener(_listener)
 
     @property
@@ -202,6 +210,7 @@ class IntegratingEnergySensor(RestoreEntity, SensorEntity):
         self._attr_native_value = None
         self._last_ts: Optional[float] = None
         self._last_kw: Optional[float] = None
+        self._last_publish_ts: float = 0.0
 
     async def async_added_to_hass(self):
         last = await self.async_get_last_state()
@@ -224,7 +233,9 @@ class IntegratingEnergySensor(RestoreEntity, SensorEntity):
                         kwh = (self._last_kw + float(p)) / 2.0 * (dt / 3600.0)
                         if kwh > 0:
                             self._attr_native_value = (self._attr_native_value or 0.0) + kwh
-                            self.async_write_ha_state()
+                            if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                                self._last_publish_ts = now
+                                self.async_write_ha_state()
                 self._last_ts = now
                 self._last_kw = float(p)
         self._hub.add_listener(_listener)
@@ -276,7 +287,9 @@ class GridSplitEnergySensor(IntegratingEnergySensor):
                         kwh = (self._last_kw + val) / 2.0 * (dt / 3600.0)
                         if kwh > 0:
                             self._attr_native_value = (self._attr_native_value or 0.0) + kwh
-                            self.async_write_ha_state()
+                            if (now - self._last_publish_ts) >= getattr(self._hub, "ws_update_interval", 1):
+                                self._last_publish_ts = now
+                                self.async_write_ha_state()
                 self._last_ts = now
                 self._last_kw = val
         self._hub.add_listener(_listener)

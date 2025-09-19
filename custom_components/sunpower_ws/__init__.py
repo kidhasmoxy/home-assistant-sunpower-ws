@@ -16,6 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_HOST = "172.27.153.1"
 DEFAULT_PORT = 9002
 DEFAULT_POLL_INTERVAL = 300  # seconds
+DEFAULT_WS_UPDATE_INTERVAL = 5  # seconds for throttling WS-driven sensor writes
 WS_PATH = "/"
 
 PLATFORMS = ["sensor"]
@@ -46,12 +47,13 @@ FIELD_MAP = {
 class SunPowerWSHub:
     """WebSocket client + optional low-rate DeviceList poller."""
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, poll_interval: int, enable_devicelist_scan: bool):
+    def __init__(self, hass: HomeAssistant, host: str, port: int, poll_interval: int, enable_devicelist_scan: bool, ws_update_interval: int):
         self.hass = hass
         self.host = host
         self.port = port
         self.poll_interval = max(60, int(poll_interval or DEFAULT_POLL_INTERVAL))
         self.enable_devicelist_scan = enable_devicelist_scan
+        self.ws_update_interval = max(1, int(ws_update_interval or DEFAULT_WS_UPDATE_INTERVAL))
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._listeners: list[Callable[[dict], None]] = []
@@ -284,7 +286,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     port = entry.data.get("port", DEFAULT_PORT)
     poll_interval = entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)
     enable_devicelist_scan = entry.data.get("enable_devicelist_scan", True)
-    hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan)
+    ws_update_interval = entry.data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
+    hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan, ws_update_interval)
     hass.data.setdefault(DOMAIN, {})["hub"] = hub
     await hub.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
