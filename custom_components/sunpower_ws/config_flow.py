@@ -61,7 +61,7 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
             self.hass.config_entries.async_update_entry(entry, options=options)
             await self.hass.config_entries.async_reload(entry.entry_id)
-            return self.async_create_entry(title="", data={})
+            return self.async_abort(reason="reconfigured")
 
         schema = vol.Schema({
             vol.Optional("host", default=current.get("host", DEFAULT_HOST)): str,

@@ -58,9 +58,11 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
         entities.append(GenericLiveSensor(hub, key, uid, name, uom, device_class, enabled_by_default=True))
 
     # Legacy W sensors (toggle via Options)
-    enable_w = bool(entry.data.get("enable_w_sensors", False))
-    for key, (uid, name, uom, device_class) in W_SENSORS.items():
-        entities.append(GenericLiveSensor(hub, key, uid, name, uom, device_class, enabled_by_default=enable_w))
+    cfg = {**entry.data, **entry.options}
+    enable_w = bool(cfg.get("enable_w_sensors", False))
+    if enable_w:
+        for key, (uid, name, uom, device_class) in W_SENSORS.items():
+            entities.append(GenericLiveSensor(hub, key, uid, name, uom, device_class, enabled_by_default=True))
 
     # Grid import/export (kW) split
     entities.append(GridSplitPowerSensor(hub, "import"))
