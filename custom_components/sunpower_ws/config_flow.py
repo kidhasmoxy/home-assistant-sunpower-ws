@@ -4,6 +4,7 @@ import logging
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
@@ -13,6 +14,15 @@ _LOGGER = logging.getLogger(__name__)
 
 class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
+    
+    # Define allowed sources
+    SUPPORTED_SOURCES = ["user", "import", "reconfigure"]
+    
+    # This enables the reconfigure button in the UI
+    @property
+    def _supports_reconfigure(self) -> bool:
+        return True
 
     async def async_step_user(self, user_input=None) -> FlowResult:
         if user_input is not None:
@@ -44,10 +54,23 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_import(self, user_input=None) -> FlowResult:
         return await self.async_step_user(user_input)
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return SunPowerWSOptionsFlowHandler(config_entry)
+        
     async def async_step_reconfigure(self, user_input=None) -> FlowResult:
-        entry_id = self.context.get("entry_id")
-        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        """Handle the reconfigure step."""
+        # Get the entry_id from context
+        if "entry_id" not in self.context:
+            _LOGGER.error("Reconfigure called without entry_id in context")
+            return self.async_abort(reason="unknown")
+            
+        entry_id = self.context["entry_id"]
+        entry = self.hass.config_entries.async_get_entry(entry_id)
+        
         if entry is None:
+            _LOGGER.error(f"Could not find entry with ID {entry_id}")
             return self.async_abort(reason="unknown")
 
         current = {**entry.data, **entry.options}
@@ -284,7 +307,3 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
         )
 
 
-
-
-async def async_get_options_flow(config_entry):
-    return SunPowerWSOptionsFlowHandler(config_entry)

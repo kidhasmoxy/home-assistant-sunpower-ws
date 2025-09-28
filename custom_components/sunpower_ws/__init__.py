@@ -64,6 +64,8 @@ class SunPowerWSHub:
         self._task: Optional[asyncio.Task] = None
         self._poll_task: Optional[asyncio.Task] = None
         self._stopped = asyncio.Event()
+        self._connected = False
+        self._last_connection_attempt = 0
 
     def add_listener(self, cb: Callable[[dict], None]) -> None:
         self._listeners.append(cb)
@@ -72,55 +74,152 @@ class SunPowerWSHub:
         self._devicelist_listeners.append(cb)
 
     async def async_start(self) -> None:
+        """Start the hub and connect to the WebSocket."""
+        # Don't start if already running
         if self._task:
+            _LOGGER.debug("Hub already started, not starting again")
             return
-        self._session = aiohttp.ClientSession()
-        self._task = self.hass.async_create_task(self._runner())
-        # Start lightweight DeviceList poller for lifetime/panels
+            
+        _LOGGER.debug("Starting SunPowerWSHub for %s:%s", self.host, self.port)
+        
+        # Reset the stopped flag
+        self._stopped.clear()
+        
+        # Create a new session if needed
+        if not self._session:
+            self._session = aiohttp.ClientSession()
+            
+        # Start the WebSocket runner task
+        self._task = self.hass.async_create_task(
+            self._runner(),
+            name="SunPowerWS WebSocket Runner"
+        )
+        
+        # Start the DeviceList poller if enabled
         if self.enable_devicelist_scan:
-            self._poll_task = self.hass.async_create_task(self._devicelist_poller())
+            _LOGGER.debug("Starting DeviceList poller with interval %s seconds", self.poll_interval)
+            self._poll_task = self.hass.async_create_task(
+                self._devicelist_poller(),
+                name="SunPowerWS DeviceList Poller"
+            )
+            
+        # Register stop handler
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_hass_stop)
 
     async def async_stop(self) -> None:
+        """Stop the hub and clean up resources."""
+        _LOGGER.debug("Stopping SunPowerWSHub")
         self._stopped.set()
+        
+        # Close the WebSocket connection
         if self._ws:
-            await self._ws.close()
+            try:
+                if not self._ws.closed:
+                    await self._ws.close()
+                self._ws = None
+            except Exception as e:
+                _LOGGER.warning("Error closing WebSocket connection: %s", e)
+        
+        # Cancel and wait for tasks to complete
+        for task_name, task in [("WebSocket", self._task), ("DeviceList poller", self._poll_task)]:
+            if task:
+                try:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await asyncio.wait_for(task, timeout=5)
+                        except asyncio.TimeoutError:
+                            _LOGGER.warning("%s task did not complete in time", task_name)
+                        except asyncio.CancelledError:
+                            pass
+                except Exception as e:
+                    _LOGGER.warning("Error cancelling %s task: %s", task_name, e)
+        
+        # Close the HTTP session
         if self._session:
-            await self._session.close()
-        if self._task:
-            await self._task
-        if self._poll_task:
-            await self._poll_task
+            try:
+                await self._session.close()
+                self._session = None
+            except Exception as e:
+                _LOGGER.warning("Error closing HTTP session: %s", e)
+                
+        # Reset connection status
+        self._connected = False
+        _LOGGER.debug("SunPowerWSHub stopped successfully")
 
     async def _runner(self) -> None:
         url = f"ws://{self.host}:{self.port}{WS_PATH}"
         backoff = 1
         while not self._stopped.is_set():
             try:
-                _LOGGER.info("Connecting to SunPower PVS WS at %s", url)
+                # Only log connection attempts if we're not connected or it's been a while
+                import time
+                now = time.time()
+                if not self._connected or (now - self._last_connection_attempt) > 60:
+                    _LOGGER.info("Connecting to SunPower PVS WS at %s", url)
+                else:
+                    _LOGGER.debug("Reconnecting to SunPower PVS WS at %s", url)
+                
+                self._last_connection_attempt = now
                 assert self._session is not None
-                # Add connection timeout to prevent hanging
+                
+                # Try to establish WebSocket connection with timeout
                 try:
-                    async with asyncio.timeout(10):  # 10 second timeout for connection
-                        async with self._session.ws_connect(url, heartbeat=30) as ws:
-                            self._ws = ws
-                            backoff = 1
-                            async for msg in ws:
-                                if msg.type == aiohttp.WSMsgType.TEXT:
-                                    try:
-                                        data = json.loads(msg.data)
-                                    except Exception:
-                                        _LOGGER.debug("Non-JSON message: %s", msg.data)
-                                        continue
-                                    normalized = self._normalize_payload(data)
-                                    if normalized:
-                                        for cb in self._listeners:
+                    # Use timeout only for the connection establishment
+                    async with asyncio.timeout(10):  # 10 second timeout for connection only
+                        self._ws = await self._session.ws_connect(url, heartbeat=30)
+                    
+                    if not self._connected:
+                        _LOGGER.info("Successfully connected to WebSocket at %s", url)
+                    else:
+                        _LOGGER.debug("Successfully reconnected to WebSocket at %s", url)
+                    
+                    self._connected = True
+                    backoff = 1  # Reset backoff on successful connection
+                    
+                    # Handle WebSocket messages (no timeout here - let it run indefinitely)
+                    try:
+                        async for msg in self._ws:
+                            if self._stopped.is_set():
+                                break
+                                
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                try:
+                                    data = json.loads(msg.data)
+                                except json.JSONDecodeError:
+                                    _LOGGER.debug("Non-JSON message: %s", msg.data)
+                                    continue
+                                normalized = self._normalize_payload(data)
+                                if normalized:
+                                    for cb in self._listeners:
+                                        try:
                                             cb(normalized)
-                                elif msg.type == aiohttp.WSMsgType.ERROR:
-                                    _LOGGER.warning("WS error: %s", ws.exception())
-                                    break
+                                        except Exception as cb_error:
+                                            _LOGGER.error("Error in WebSocket callback: %s", cb_error)
+                            elif msg.type == aiohttp.WSMsgType.ERROR:
+                                _LOGGER.warning("WS error: %s", self._ws.exception())
+                                break
+                            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                _LOGGER.info("WebSocket connection closed")
+                                break
+                            elif msg.type == aiohttp.WSMsgType.CLOSING:
+                                _LOGGER.info("WebSocket connection closing")
+                                break
+                    except Exception as e:
+                        _LOGGER.warning("Error processing WebSocket messages: %s", e)
+                    finally:
+                        # Clean up the WebSocket connection
+                        if self._ws and not self._ws.closed:
+                            await self._ws.close()
+                        self._ws = None
+                        if self._connected:
+                            _LOGGER.info("WebSocket connection to %s lost", url)
+                            self._connected = False
+                        
                 except asyncio.TimeoutError:
-                    _LOGGER.warning("Timeout connecting to SunPower PVS at %s", url)
+                    _LOGGER.warning("Timeout connecting to SunPower PVS at %s (connection took longer than 10 seconds)", url)
+                except aiohttp.ClientError as e:
+                    _LOGGER.warning("Failed to connect to WebSocket at %s: %s", url, e)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -129,33 +228,78 @@ class SunPowerWSHub:
             backoff = min(backoff * 2, 30)
 
     async def _devicelist_poller(self) -> None:
+        """Poll the DeviceList API periodically for inverter data."""
         url = f"http://{self.host}/cgi-bin/dl_cgi?Command=DeviceList"
         backoff = self.poll_interval
+        poll_count = 0
+        success_count = 0
+        error_count = 0
+        
+        _LOGGER.debug("Starting DeviceList poller with interval %s seconds", self.poll_interval)
+        
         while not self._stopped.is_set():
+            poll_count += 1
             try:
-                assert self._session is not None
+                if self._session is None:
+                    _LOGGER.warning("HTTP session is None, creating new session")
+                    self._session = aiohttp.ClientSession()
+                    
                 try:
                     # Use asyncio.timeout for the entire operation
                     async with asyncio.timeout(20):
-                        async with self._session.get(url, timeout=15) as resp:
-                            if resp.status == 200:
-                                data = await resp.json(content_type=None)
-                                parsed = self._parse_devicelist(data)
-                                for cb in self._devicelist_listeners:
-                                    cb(parsed)
-                                backoff = self.poll_interval
-                            else:
-                                _LOGGER.debug("DeviceList HTTP %s", resp.status)
-                                backoff = min(max(60, backoff * 2), 3600)
+                        try:
+                            async with self._session.get(url, timeout=15) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json(content_type=None)
+                                    parsed = self._parse_devicelist(data)
+                                    
+                                    # Notify listeners
+                                    for cb in self._devicelist_listeners:
+                                        try:
+                                            cb(parsed)
+                                        except Exception as cb_error:
+                                            _LOGGER.error("Error in DeviceList callback: %s", cb_error)
+                                    
+                                    # Reset backoff on success
+                                    backoff = self.poll_interval
+                                    success_count += 1
+                                    
+                                    # Log success periodically
+                                    if success_count % 10 == 0:
+                                        _LOGGER.debug("DeviceList poll success count: %s", success_count)
+                                else:
+                                    _LOGGER.warning("DeviceList HTTP error: %s", resp.status)
+                                    backoff = min(max(60, backoff * 2), 3600)
+                                    error_count += 1
+                        except aiohttp.ClientError as client_error:
+                            _LOGGER.warning("DeviceList HTTP client error: %s", client_error)
+                            backoff = min(max(60, backoff * 2), 3600)
+                            error_count += 1
                 except asyncio.TimeoutError:
                     _LOGGER.warning("Timeout fetching DeviceList from %s", url)
                     backoff = min(max(60, backoff * 2), 3600)
+                    error_count += 1
             except asyncio.CancelledError:
+                _LOGGER.info("DeviceList poller cancelled")
                 break
             except Exception as e:
-                _LOGGER.debug("DeviceList poll error: %s", e)
+                _LOGGER.error("DeviceList poll error: %s", e)
                 backoff = min(max(60, backoff * 2), 3600)
-            await asyncio.sleep(backoff)
+                error_count += 1
+                
+            # Log error stats periodically
+            if error_count > 0 and error_count % 5 == 0:
+                _LOGGER.warning("DeviceList poll errors: %s/%s", error_count, poll_count)
+                
+            # Wait before next poll
+            try:
+                await asyncio.sleep(backoff)
+            except asyncio.CancelledError:
+                _LOGGER.info("DeviceList poller sleep cancelled")
+                break
+                
+        _LOGGER.info("DeviceList poller stopped after %s polls (%s successful, %s errors)",
+                     poll_count, success_count, error_count)
 
     def _parse_devicelist(self, data: dict) -> dict:
         result: dict[str, Any] = {"site_lifetime_kwh": None, "inverters": []}
@@ -302,45 +446,81 @@ class SunPowerWSHub:
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    # Register the reconfigure service
+    await async_setup_reconfigure(hass)
+    
+    # Register the config entry button handler
+    from .config_entry import async_reconfigure_button
+    hass.data.setdefault(DOMAIN, {})["config_entry_buttons"] = {
+        "reconfigure": async_reconfigure_button,
+    }
+    
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    cfg = {**entry.data, **entry.options}
-    host = cfg.get("host", DEFAULT_HOST)
-    port = cfg.get("port", DEFAULT_PORT)
-    poll_interval = cfg.get("poll_interval", DEFAULT_POLL_INTERVAL)
-    enable_devicelist_scan = cfg.get("enable_devicelist_scan", True)
-    ws_update_interval = cfg.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
-    consumption_measure = cfg.get("consumption_measure", "house_usage")
-    enable_ws_throttle = cfg.get("enable_ws_throttle", True)
-    
-    # Register the device in the device registry
-    device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, "sunpower_pvs_ws")},
-        name="SunPower PVS (WebSocket)",
-        manufacturer="SunPower",
-        model="PVS (local WS)",
-        configuration_url=f"http://{host}",
-    )
-    
-    hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan, ws_update_interval, consumption_measure, enable_ws_throttle)
-    hass.data.setdefault(DOMAIN, {})["hub"] = hub
+    """Set up SunPower WebSocket from a config entry."""
+    _LOGGER.info("Setting up SunPower WebSocket integration for entry: %s", entry.entry_id)
     
     try:
+        # Get configuration from entry data and options
+        cfg = {**entry.data, **entry.options}
+        host = cfg.get("host", DEFAULT_HOST)
+        port = cfg.get("port", DEFAULT_PORT)
+        poll_interval = cfg.get("poll_interval", DEFAULT_POLL_INTERVAL)
+        enable_devicelist_scan = cfg.get("enable_devicelist_scan", True)
+        ws_update_interval = cfg.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
+        consumption_measure = cfg.get("consumption_measure", "house_usage")
+        enable_ws_throttle = cfg.get("enable_ws_throttle", True)
+        
+        _LOGGER.debug(
+            "Configuration: host=%s, port=%s, poll_interval=%s, enable_devicelist_scan=%s, "
+            "ws_update_interval=%s, consumption_measure=%s, enable_ws_throttle=%s",
+            host, port, poll_interval, enable_devicelist_scan, 
+            ws_update_interval, consumption_measure, enable_ws_throttle
+        )
+        
+        # Register the device in the device registry
+        device_registry = dr.async_get(hass)
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "sunpower_pvs_ws")},
+            name="SunPower PVS (WebSocket)",
+            manufacturer="SunPower",
+            model="PVS (local WS)",
+            configuration_url=f"http://{host}",
+        )
+        
+        # Create and store the hub instance
+        hub = SunPowerWSHub(
+            hass, host, port, poll_interval, enable_devicelist_scan, 
+            ws_update_interval, consumption_measure, enable_ws_throttle
+        )
+        hass.data.setdefault(DOMAIN, {})["hub"] = hub
+        
         # Start the hub with a timeout to prevent bootstrap hanging
-        async with asyncio.timeout(30):  # 30 second timeout for startup
-            await hub.async_start()
-    except asyncio.TimeoutError:
-        _LOGGER.warning("Timeout starting SunPower WebSocket hub. Continuing setup with limited functionality.")
-        # We'll continue setup even if the hub doesn't fully start
-    
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    # Reload integration when options change
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    return True
+        try:
+            _LOGGER.debug("Starting the SunPower WebSocket hub")
+            async with asyncio.timeout(30):  # 30 second timeout for startup
+                await hub.async_start()
+            _LOGGER.info("SunPower WebSocket hub started successfully")
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Timeout starting SunPower WebSocket hub. Continuing setup with limited functionality.")
+            # We'll continue setup even if the hub doesn't fully start
+        
+        # Set up the sensor platform
+        _LOGGER.debug("Setting up sensor platform")
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        
+        # Reload integration when options change
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+        
+        _LOGGER.info("SunPower WebSocket integration setup complete for entry: %s", entry.entry_id)
+        return True
+        
+    except Exception as ex:
+        _LOGGER.exception("Error setting up SunPower WebSocket integration: %s", ex)
+        raise
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -358,4 +538,28 @@ def get_hub(hass: HomeAssistant) -> SunPowerWSHub | None:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update by reloading the config entry."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    try:
+        await asyncio.wait_for(hass.config_entries.async_reload(entry.entry_id), timeout=30)
+    except asyncio.TimeoutError:
+        _LOGGER.warning("Timeout during reload after options update for entry %s", entry.entry_id)
+
+
+async def async_setup_reconfigure(hass: HomeAssistant) -> None:
+    """Set up the reconfigure flow handler."""
+    
+    @callback
+    def _handle_reconfigure(call) -> None:
+        """Handle the reconfigure service call."""
+        entry_id = call.data.get("entry_id")
+        if not entry_id:
+            _LOGGER.error("Reconfigure service called without entry_id")
+            return
+            
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": "reconfigure", "entry_id": entry_id},
+            )
+        )
+    
+    hass.services.async_register(DOMAIN, "reconfigure", _handle_reconfigure)
