@@ -2,7 +2,6 @@ from __future__ import annotations
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
@@ -49,14 +48,22 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         current = {**entry.data, **entry.options}
         if user_input is not None:
-            options = {
+            options = {}
+            # Copy existing options first
+            for key, value in current.items():
+                if key not in ["host", "port", "enable_w_sensors", "enable_devicelist_scan", 
+                              "consumption_measure", "enable_ws_throttle", "ws_update_interval", "poll_interval"]:
+                    options[key] = value
+                    
+            # Update with new values
+            options.update({
                 "host": user_input.get("host", current.get("host")),
                 "port": int(user_input.get("port", current.get("port", DEFAULT_PORT))),
                 "enable_w_sensors": bool(user_input.get("enable_w_sensors", current.get("enable_w_sensors", False))),
                 "enable_devicelist_scan": bool(user_input.get("enable_devicelist_scan", current.get("enable_devicelist_scan", True))),
                 "consumption_measure": user_input.get("consumption_measure", current.get("consumption_measure", "house_usage")),
                 "enable_ws_throttle": bool(user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))),
-            }
+            })
             
             # Add interval settings if provided
             if "ws_update_interval" in user_input:
@@ -69,7 +76,8 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             elif options["enable_devicelist_scan"]:
                 options["poll_interval"] = current.get("poll_interval", DEFAULT_POLL_INTERVAL)
                 
-            self.hass.config_entries.async_update_entry(entry, options=options)
+            # Update the entry with new options
+            self.hass.config_entries.async_update_entry(entry, data={}, options=options)
             await self.hass.config_entries.async_reload(entry.entry_id)
             return self.async_abort(reason="reconfigured")
 
@@ -96,21 +104,9 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Add throttle toggle
         schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = bool
         
-        # Add conditional fields based on current values or user_input
-        show_ws_interval = current.get("enable_ws_throttle", True)
-        show_poll_interval = current.get("enable_devicelist_scan", True)
-        
-        # If we have user_input, use those values to determine what to show
-        if user_input is not None:
-            show_ws_interval = user_input.get("enable_ws_throttle", show_ws_interval)
-            show_poll_interval = user_input.get("enable_devicelist_scan", show_poll_interval)
-        
-        # Add interval fields conditionally
-        if show_ws_interval:
-            schema_dict[vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = int
-        
-        if show_poll_interval:
-            schema_dict[vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL))] = int
+        # Always add interval fields - Home Assistant will handle conditional display
+        schema_dict[vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = int
+        schema_dict[vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL))] = int
         
         schema = vol.Schema(schema_dict)
         return self.async_show_form(step_id="reconfigure", data_schema=schema, last_step=True)
@@ -124,14 +120,22 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         current = {**self.config_entry.data, **self.config_entry.options}
         if user_input is not None:
-            options = {
+            options = {}
+            # Copy existing options first
+            for key, value in current.items():
+                if key not in ["host", "port", "enable_w_sensors", "enable_devicelist_scan", 
+                              "consumption_measure", "enable_ws_throttle", "ws_update_interval", "poll_interval"]:
+                    options[key] = value
+                    
+            # Update with new values
+            options.update({
                 "host": user_input.get("host", current.get("host")),
                 "port": int(user_input.get("port", current.get("port", DEFAULT_PORT))),
                 "enable_w_sensors": bool(user_input.get("enable_w_sensors", current.get("enable_w_sensors", False))),
                 "enable_devicelist_scan": bool(user_input.get("enable_devicelist_scan", current.get("enable_devicelist_scan", True))),
                 "consumption_measure": user_input.get("consumption_measure", current.get("consumption_measure", "house_usage")),
                 "enable_ws_throttle": bool(user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))),
-            }
+            })
             
             # Add interval settings if provided
             if "ws_update_interval" in user_input:
@@ -144,7 +148,8 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
             elif options["enable_devicelist_scan"]:
                 options["poll_interval"] = current.get("poll_interval", DEFAULT_POLL_INTERVAL)
                 
-            self.hass.config_entries.async_update_entry(self.config_entry, options=options)
+            # Update the entry with new options
+            self.hass.config_entries.async_update_entry(self.config_entry, data={}, options=options)
             return self.async_create_entry(title="", data={})
 
         # Build schema with conditional fields
@@ -170,21 +175,9 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
         # Add throttle toggle
         schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = bool
         
-        # Add conditional fields based on current values or user_input
-        show_ws_interval = current.get("enable_ws_throttle", True)
-        show_poll_interval = current.get("enable_devicelist_scan", True)
-        
-        # If we have user_input, use those values to determine what to show
-        if user_input is not None:
-            show_ws_interval = user_input.get("enable_ws_throttle", show_ws_interval)
-            show_poll_interval = user_input.get("enable_devicelist_scan", show_poll_interval)
-        
-        # Add interval fields conditionally
-        if show_ws_interval:
-            schema_dict[vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = int
-        
-        if show_poll_interval:
-            schema_dict[vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL))] = int
+        # Always add interval fields - Home Assistant will handle conditional display
+        schema_dict[vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = int
+        schema_dict[vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL))] = int
         
         schema = vol.Schema(schema_dict)
         return self.async_show_form(step_id="init", data_schema=schema, last_step=True)
