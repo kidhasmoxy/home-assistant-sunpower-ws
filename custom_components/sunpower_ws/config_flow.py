@@ -107,35 +107,55 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         }
         
-        # Add devicelist scan toggle and its dependent field
-        schema_dict[vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True))] = bool
+        # Add devicelist scan toggle with conditional fields
+        schema_dict[vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True))] = selector.BooleanSelector(
+            selector.BooleanSelectorConfig(
+                # This is the key - using a selector with show_toggle=True enables dynamic fields
+                show_toggle=True,
+            )
+        )
         
-        # Only show poll_interval if devicelist scan is enabled
-        if user_input is not None:
-            show_poll = user_input.get("enable_devicelist_scan", current.get("enable_devicelist_scan", True))
-        else:
-            show_poll = current.get("enable_devicelist_scan", True)
-            
-        if show_poll:
-            schema_dict[vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL))] = int
+        # Add poll_interval as a conditional field under enable_devicelist_scan
+        schema_dict["poll_interval"] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=60,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
+                # This makes the field conditional on the toggle above
+                required=current.get("enable_devicelist_scan", True),
+            )
+        )
         
-        # Add throttle toggle and its dependent field
-        schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = bool
+        # Add throttle toggle with conditional fields
+        schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = selector.BooleanSelector(
+            selector.BooleanSelectorConfig(
+                show_toggle=True,
+            )
+        )
         
-        # Only show ws_update_interval if throttle is enabled
-        if user_input is not None:
-            show_ws = user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))
-        else:
-            show_ws = current.get("enable_ws_throttle", True)
-            
-        if show_ws:
-            schema_dict[vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = int
+        # Add ws_update_interval as a conditional field under enable_ws_throttle
+        schema_dict["ws_update_interval"] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
+                # This makes the field conditional on the toggle above
+                required=current.get("enable_ws_throttle", True),
+            )
+        )
+        
+        # Set default values for the conditional fields
+        defaults = {
+            "poll_interval": current.get("poll_interval", DEFAULT_POLL_INTERVAL),
+            "ws_update_interval": current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL),
+        }
         
         schema = vol.Schema(schema_dict)
         return self.async_show_form(
             step_id="reconfigure", 
             data_schema=schema, 
             errors=errors,
+            description_placeholders=defaults,
             last_step=True
         )
 
@@ -203,35 +223,55 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
             ),
         }
         
-        # Add devicelist scan toggle and its dependent field
-        schema_dict[vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True))] = bool
+        # Add devicelist scan toggle with conditional fields
+        schema_dict[vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True))] = selector.BooleanSelector(
+            selector.BooleanSelectorConfig(
+                # This is the key - using a selector with show_toggle=True enables dynamic fields
+                show_toggle=True,
+            )
+        )
         
-        # Only show poll_interval if devicelist scan is enabled
-        if user_input is not None:
-            show_poll = user_input.get("enable_devicelist_scan", current.get("enable_devicelist_scan", True))
-        else:
-            show_poll = current.get("enable_devicelist_scan", True)
-            
-        if show_poll:
-            schema_dict[vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL))] = int
+        # Add poll_interval as a conditional field under enable_devicelist_scan
+        schema_dict["poll_interval"] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=60,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
+                # This makes the field conditional on the toggle above
+                required=current.get("enable_devicelist_scan", True),
+            )
+        )
         
-        # Add throttle toggle and its dependent field
-        schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = bool
+        # Add throttle toggle with conditional fields
+        schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = selector.BooleanSelector(
+            selector.BooleanSelectorConfig(
+                show_toggle=True,
+            )
+        )
         
-        # Only show ws_update_interval if throttle is enabled
-        if user_input is not None:
-            show_ws = user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))
-        else:
-            show_ws = current.get("enable_ws_throttle", True)
-            
-        if show_ws:
-            schema_dict[vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = int
+        # Add ws_update_interval as a conditional field under enable_ws_throttle
+        schema_dict["ws_update_interval"] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
+                # This makes the field conditional on the toggle above
+                required=current.get("enable_ws_throttle", True),
+            )
+        )
+        
+        # Set default values for the conditional fields
+        defaults = {
+            "poll_interval": current.get("poll_interval", DEFAULT_POLL_INTERVAL),
+            "ws_update_interval": current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL),
+        }
         
         schema = vol.Schema(schema_dict)
         return self.async_show_form(
             step_id="init", 
             data_schema=schema, 
             errors=errors,
+            description_placeholders=defaults,
             last_step=True
         )
 

@@ -9,6 +9,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers import device_registry as dr
 
 DOMAIN = "sunpower_ws"
 _LOGGER = logging.getLogger(__name__)
@@ -248,11 +249,14 @@ class SunPowerWSHub:
                 return None
 
         if "pv_kw" in result and "solar_w" not in result:
-            vw = kw_to_w(result["pv_kw"]);  result["solar_w"] = vw if vw is not None else result.get("solar_w")
+            vw = kw_to_w(result["pv_kw"])
+            result["solar_w"] = vw if vw is not None else result.get("solar_w")
         if "load_kw" in result and "load_w" not in result:
-            vw = kw_to_w(result["load_kw"]); result["load_w"] = vw if vw is not None else result.get("load_w")
+            vw = kw_to_w(result["load_kw"])
+            result["load_w"] = vw if vw is not None else result.get("load_w")
         if "net_kw" in result and "net_w" not in result:
-            vw = kw_to_w(result["net_kw"]);  result["net_w"] = vw if vw is not None else result.get("net_w")
+            vw = kw_to_w(result["net_kw"])
+            result["net_w"] = vw if vw is not None else result.get("net_w")
 
         # Compute/override net based on configured consumption measure
         try:
@@ -299,6 +303,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ws_update_interval = cfg.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
     consumption_measure = cfg.get("consumption_measure", "house_usage")
     enable_ws_throttle = cfg.get("enable_ws_throttle", True)
+    
+    # Register the device in the device registry
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "sunpower_pvs_ws")},
+        name="SunPower PVS (WebSocket)",
+        manufacturer="SunPower",
+        model="PVS (local WS)",
+        configuration_url=f"http://{host}",
+    )
+    
     hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan, ws_update_interval, consumption_measure, enable_ws_throttle)
     hass.data.setdefault(DOMAIN, {})["hub"] = hub
     await hub.async_start()
