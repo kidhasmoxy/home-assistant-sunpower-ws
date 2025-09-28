@@ -1,4 +1,5 @@
 {
-  "name": "SunPower WebSocket (PVS)",
-  "render_readme": true
+    "name":  "SunPower WebSocket (PVS)",
+    "render_readme":  true,
+    "image":  "ap_resize.png"
 }
