@@ -89,13 +89,13 @@ class SunPowerWSHub:
         if not self._session:
             self._session = aiohttp.ClientSession()
             
-        # Start the WebSocket runner task
+        # Start the WebSocket runner task (non-blocking)
         self._task = self.hass.async_create_task(
             self._runner(),
             name="SunPowerWS WebSocket Runner"
         )
         
-        # Start the DeviceList poller if enabled
+        # Start the DeviceList poller if enabled (non-blocking)
         if self.enable_devicelist_scan:
             _LOGGER.debug("Starting DeviceList poller with interval %s seconds", self.poll_interval)
             self._poll_task = self.hass.async_create_task(
@@ -105,6 +105,11 @@ class SunPowerWSHub:
             
         # Register stop handler
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_hass_stop)
+        
+        # Give the tasks a brief moment to start, but don't wait for connection
+        # This prevents bootstrap hanging while still allowing connection attempts
+        await asyncio.sleep(0.1)
+        _LOGGER.debug("SunPowerWSHub startup initiated (tasks started)")
 
     async def async_stop(self) -> None:
         """Stop the hub and clean up resources."""
@@ -165,7 +170,7 @@ class SunPowerWSHub:
                 
                 # Try to establish WebSocket connection with timeout
                 try:
-                    # Use timeout only for the connection establishment
+                    # Use timeout for the connection establishment
                     async with asyncio.timeout(10):  # 10 second timeout for connection only
                         self._ws = await self._session.ws_connect(url, heartbeat=30)
                     
@@ -177,40 +182,50 @@ class SunPowerWSHub:
                     self._connected = True
                     backoff = 1  # Reset backoff on successful connection
                     
-                    # Handle WebSocket messages (no timeout here - let it run indefinitely)
+                    # Handle WebSocket messages with periodic checks for stop signal
                     try:
-                        async for msg in self._ws:
-                            if self._stopped.is_set():
-                                break
+                        while not self._stopped.is_set():
+                            try:
+                                # Wait for message with timeout to allow periodic stop checks
+                                msg = await asyncio.wait_for(self._ws.receive(), timeout=5.0)
                                 
-                            if msg.type == aiohttp.WSMsgType.TEXT:
-                                try:
-                                    data = json.loads(msg.data)
-                                except json.JSONDecodeError:
-                                    _LOGGER.debug("Non-JSON message: %s", msg.data)
-                                    continue
-                                normalized = self._normalize_payload(data)
-                                if normalized:
-                                    for cb in self._listeners:
-                                        try:
-                                            cb(normalized)
-                                        except Exception as cb_error:
-                                            _LOGGER.error("Error in WebSocket callback: %s", cb_error)
-                            elif msg.type == aiohttp.WSMsgType.ERROR:
-                                _LOGGER.warning("WS error: %s", self._ws.exception())
-                                break
-                            elif msg.type == aiohttp.WSMsgType.CLOSED:
-                                _LOGGER.info("WebSocket connection closed")
-                                break
-                            elif msg.type == aiohttp.WSMsgType.CLOSING:
-                                _LOGGER.info("WebSocket connection closing")
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    try:
+                                        data = json.loads(msg.data)
+                                    except json.JSONDecodeError:
+                                        _LOGGER.debug("Non-JSON message: %s", msg.data)
+                                        continue
+                                    normalized = self._normalize_payload(data)
+                                    if normalized:
+                                        for cb in self._listeners:
+                                            try:
+                                                cb(normalized)
+                                            except Exception as cb_error:
+                                                _LOGGER.error("Error in WebSocket callback: %s", cb_error)
+                                elif msg.type == aiohttp.WSMsgType.ERROR:
+                                    _LOGGER.warning("WS error: %s", self._ws.exception())
+                                    break
+                                elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                    _LOGGER.info("WebSocket connection closed")
+                                    break
+                                elif msg.type == aiohttp.WSMsgType.CLOSING:
+                                    _LOGGER.info("WebSocket connection closing")
+                                    break
+                            except asyncio.TimeoutError:
+                                # Timeout waiting for message - this is normal, just continue
+                                continue
+                            except Exception as msg_error:
+                                _LOGGER.warning("Error receiving WebSocket message: %s", msg_error)
                                 break
                     except Exception as e:
                         _LOGGER.warning("Error processing WebSocket messages: %s", e)
                     finally:
                         # Clean up the WebSocket connection
                         if self._ws and not self._ws.closed:
-                            await self._ws.close()
+                            try:
+                                await self._ws.close()
+                            except Exception:
+                                pass
                         self._ws = None
                         if self._connected:
                             _LOGGER.info("WebSocket connection to %s lost", url)
@@ -220,6 +235,8 @@ class SunPowerWSHub:
                     _LOGGER.warning("Timeout connecting to SunPower PVS at %s (connection took longer than 10 seconds)", url)
                 except aiohttp.ClientError as e:
                     _LOGGER.warning("Failed to connect to WebSocket at %s: %s", url, e)
+                except Exception as e:
+                    _LOGGER.warning("Unexpected error connecting to WebSocket at %s: %s", url, e)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -490,14 +507,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data.setdefault(DOMAIN, {})["hub"] = hub
         
-        # Start the hub with a timeout to prevent bootstrap hanging
+        # Start the hub (non-blocking to prevent bootstrap hanging)
         try:
             _LOGGER.debug("Starting the SunPower WebSocket hub")
-            async with asyncio.timeout(30):  # 30 second timeout for startup
-                await hub.async_start()
-            _LOGGER.info("SunPower WebSocket hub started successfully")
-        except asyncio.TimeoutError:
-            _LOGGER.warning("Timeout starting SunPower WebSocket hub. Continuing setup with limited functionality.")
+            await hub.async_start()
+            _LOGGER.info("SunPower WebSocket hub startup initiated")
+        except Exception as ex:
+            _LOGGER.warning("Error starting SunPower WebSocket hub: %s. Continuing setup with limited functionality.", ex)
             # We'll continue setup even if the hub doesn't fully start
         
         # Set up the sensor platform
