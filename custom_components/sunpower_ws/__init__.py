@@ -446,15 +446,6 @@ class SunPowerWSHub:
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    # Register the reconfigure service
-    await async_setup_reconfigure(hass)
-    
-    # Register the config entry button handler
-    from .config_entry import async_reconfigure_button
-    hass.data.setdefault(DOMAIN, {})["config_entry_buttons"] = {
-        "reconfigure": async_reconfigure_button,
-    }
-    
     return True
 
 
@@ -538,28 +529,4 @@ def get_hub(hass: HomeAssistant) -> SunPowerWSHub | None:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update by reloading the config entry."""
-    try:
-        await asyncio.wait_for(hass.config_entries.async_reload(entry.entry_id), timeout=30)
-    except asyncio.TimeoutError:
-        _LOGGER.warning("Timeout during reload after options update for entry %s", entry.entry_id)
-
-
-async def async_setup_reconfigure(hass: HomeAssistant) -> None:
-    """Set up the reconfigure flow handler."""
-    
-    @callback
-    def _handle_reconfigure(call) -> None:
-        """Handle the reconfigure service call."""
-        entry_id = call.data.get("entry_id")
-        if not entry_id:
-            _LOGGER.error("Reconfigure service called without entry_id")
-            return
-            
-        hass.async_create_task(
-            hass.config_entries.flow.async_init(
-                DOMAIN,
-                context={"source": "reconfigure", "entry_id": entry_id},
-            )
-        )
-    
-    hass.services.async_register(DOMAIN, "reconfigure", _handle_reconfigure)
+    await hass.config_entries.async_reload(entry.entry_id)
