@@ -106,9 +106,6 @@ class SunPowerWSHub:
         # Register stop handler
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_hass_stop)
         
-        # Give the tasks a brief moment to start, but don't wait for connection
-        # This prevents bootstrap hanging while still allowing connection attempts
-        await asyncio.sleep(0.1)
         _LOGGER.debug("SunPowerWSHub startup initiated (tasks started)")
 
     async def async_stop(self) -> None:
@@ -170,8 +167,9 @@ class SunPowerWSHub:
                 
                 # Try to establish WebSocket connection with timeout
                 try:
-                    # Use timeout for the connection establishment
-                    async with asyncio.timeout(10):  # 10 second timeout for connection only
+                    # Use shorter timeout during startup to prevent bootstrap delays
+                    timeout_duration = 5 if not self._connected else 10
+                    async with asyncio.timeout(timeout_duration):
                         self._ws = await self._session.ws_connect(url, heartbeat=30)
                     
                     if not self._connected:
@@ -182,40 +180,33 @@ class SunPowerWSHub:
                     self._connected = True
                     backoff = 1  # Reset backoff on successful connection
                     
-                    # Handle WebSocket messages with periodic checks for stop signal
+                    # Handle WebSocket messages using async for loop (Home Assistant friendly)
                     try:
-                        while not self._stopped.is_set():
-                            try:
-                                # Wait for message with timeout to allow periodic stop checks
-                                msg = await asyncio.wait_for(self._ws.receive(), timeout=5.0)
+                        async for msg in self._ws:
+                            if self._stopped.is_set():
+                                break
                                 
-                                if msg.type == aiohttp.WSMsgType.TEXT:
-                                    try:
-                                        data = json.loads(msg.data)
-                                    except json.JSONDecodeError:
-                                        _LOGGER.debug("Non-JSON message: %s", msg.data)
-                                        continue
-                                    normalized = self._normalize_payload(data)
-                                    if normalized:
-                                        for cb in self._listeners:
-                                            try:
-                                                cb(normalized)
-                                            except Exception as cb_error:
-                                                _LOGGER.error("Error in WebSocket callback: %s", cb_error)
-                                elif msg.type == aiohttp.WSMsgType.ERROR:
-                                    _LOGGER.warning("WS error: %s", self._ws.exception())
-                                    break
-                                elif msg.type == aiohttp.WSMsgType.CLOSED:
-                                    _LOGGER.info("WebSocket connection closed")
-                                    break
-                                elif msg.type == aiohttp.WSMsgType.CLOSING:
-                                    _LOGGER.info("WebSocket connection closing")
-                                    break
-                            except asyncio.TimeoutError:
-                                # Timeout waiting for message - this is normal, just continue
-                                continue
-                            except Exception as msg_error:
-                                _LOGGER.warning("Error receiving WebSocket message: %s", msg_error)
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                try:
+                                    data = json.loads(msg.data)
+                                except json.JSONDecodeError:
+                                    _LOGGER.debug("Non-JSON message: %s", msg.data)
+                                    continue
+                                normalized = self._normalize_payload(data)
+                                if normalized:
+                                    for cb in self._listeners:
+                                        try:
+                                            cb(normalized)
+                                        except Exception as cb_error:
+                                            _LOGGER.error("Error in WebSocket callback: %s", cb_error)
+                            elif msg.type == aiohttp.WSMsgType.ERROR:
+                                _LOGGER.warning("WS error: %s", self._ws.exception())
+                                break
+                            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                _LOGGER.info("WebSocket connection closed")
+                                break
+                            elif msg.type == aiohttp.WSMsgType.CLOSING:
+                                _LOGGER.info("WebSocket connection closing")
                                 break
                     except Exception as e:
                         _LOGGER.warning("Error processing WebSocket messages: %s", e)
@@ -507,14 +498,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data.setdefault(DOMAIN, {})["hub"] = hub
         
-        # Start the hub (non-blocking to prevent bootstrap hanging)
+        # Start the hub in background to ensure fast bootup
         try:
-            _LOGGER.debug("Starting the SunPower WebSocket hub")
-            await hub.async_start()
-            _LOGGER.info("SunPower WebSocket hub startup initiated")
+            # Create background task without awaiting to prevent bootstrap blocking
+            hass.async_create_task(
+                hub.async_start(),
+                name="SunPowerWS Hub Background Startup"
+            )
+            _LOGGER.info("SunPower WebSocket hub background startup scheduled")
         except Exception as ex:
-            _LOGGER.warning("Error starting SunPower WebSocket hub: %s. Continuing setup with limited functionality.", ex)
-            # We'll continue setup even if the hub doesn't fully start
+            _LOGGER.warning("Error scheduling SunPower WebSocket hub startup: %s", ex)
         
         # Set up the sensor platform
         _LOGGER.debug("Setting up sensor platform")

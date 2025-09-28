@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Optional, Set
 
@@ -48,9 +49,90 @@ DERIVED_ENERGY = [
 ]
 
 
+class ConnectionStatusSensor(SensorEntity):
+    """Sensor to show WebSocket connection status."""
+    _attr_should_poll = False
+    _attr_name = "WebSocket Connection"
+    _attr_unique_id = f"{DOMAIN}_websocket_connection"
+    _attr_icon = "mdi:wifi"
+    _attr_entity_category = "diagnostic"
+
+    def __init__(self, hub: SunPowerWSHub):
+        self._hub = hub
+        self._attr_native_value = "Connecting"
+        self._last_update = None
+        self._connection_count = 0
+        self._last_error = None
+
+    async def async_added_to_hass(self):
+        """Set up connection status monitoring."""
+        @callback
+        def _connection_listener(data: dict):
+            """Update connection status when data is received."""
+            import time
+            self._last_update = time.time()
+            if self._attr_native_value != "Connected":
+                self._attr_native_value = "Connected"
+                self._attr_icon = "mdi:wifi"
+                self._connection_count += 1
+                self.async_write_ha_state()
+        
+        # Listen for any WebSocket data to detect connection
+        self._hub.add_listener(_connection_listener)
+        
+        # Check connection status periodically
+        async def _check_connection():
+            """Periodically check if connection is still active."""
+            import time
+            while True:
+                await asyncio.sleep(30)  # Check every 30 seconds
+                if self._last_update is None:
+                    # Never received data
+                    if self._attr_native_value != "Connecting":
+                        self._attr_native_value = "Connecting"
+                        self._attr_icon = "mdi:wifi-sync"
+                        self.async_write_ha_state()
+                elif time.time() - self._last_update > 120:  # No data for 2 minutes
+                    if self._attr_native_value != "Disconnected":
+                        self._attr_native_value = "Disconnected"
+                        self._attr_icon = "mdi:wifi-off"
+                        self.async_write_ha_state()
+        
+        # Start the connection checker
+        self.hass.async_create_task(_check_connection())
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return additional state attributes."""
+        attrs = {
+            "host": f"{self._hub.host}:{self._hub.port}",
+            "connection_count": self._connection_count,
+        }
+        if self._last_update:
+            attrs["last_data_received"] = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(self._last_update)
+            )
+        if self._last_error:
+            attrs["last_error"] = self._last_error
+        return attrs
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, "sunpower_pvs_ws")},
+            name="SunPower PVS (WebSocket)",
+            manufacturer="SunPower",
+            model="PVS WebSocket Gateway",
+            model_id="pvs_ws",
+        )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     hub: SunPowerWSHub = get_hub(hass)
     entities: list[SensorEntity] = []
+
+    # Connection status sensor (always enabled)
+    entities.append(ConnectionStatusSensor(hub))
 
     # kW sensors (always on)
     for key, (uid, name, uom, device_class) in KW_SENSORS.items():
