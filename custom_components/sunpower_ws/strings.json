@@ -22,6 +22,38 @@
           "enable_ws_throttle": "If enabled, sensors publish at most once per the interval above. If disabled, publish every WS message.",
           "poll_interval": "How often to poll DeviceList. Minimum 60 seconds. Higher values reduce traffic and DB writes."
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure SunPower PVS",
+        "description": "Update connection settings and options.",
+        "data": {
+          "host": "PVS IP address",
+          "port": "WebSocket port",
+          "enable_w_sensors": "Expose legacy Watt (W) sensors",
+          "enable_devicelist_scan": "Scan DeviceList for lifetime & inverter data",
+          "consumption_measure": "How to interpret 'Consumption'",
+          "enable_ws_throttle": "Throttle WebSocket updates (reduce DB writes)"
+        },
+        "data_description": {
+          "host": "Local IP address of your PVS (for example 172.27.x.x).",
+          "port": "WebSocket port exposed by the PVS (default 9002).",
+          "enable_w_sensors": "Creates PV/Home/Grid sensors in Watts (W) alongside the kW sensors. Off by default to reduce clutter.",
+          "enable_devicelist_scan": "If enabled, the integration periodically calls DeviceList over HTTP to fetch lifetime energy and per‑inverter metrics.",
+          "consumption_measure": "House usage (load): net = load − PV. Grid import: treat 'consumption' as grid import when a signed net isn't provided.",
+          "enable_ws_throttle": "If enabled, sensors publish at most once per the interval above. If disabled, publish every WS message."
+        }
+      },
+      "reconfigure_advanced": {
+        "title": "Advanced Settings",
+        "description": "Configure intervals for enabled features.",
+        "data": {
+          "ws_update_interval": "WebSocket update interval (seconds)",
+          "poll_interval": "DeviceList polling interval (seconds, min 60)"
+        },
+        "data_description": {
+          "ws_update_interval": "How often to publish state updates from the WebSocket (throttling). Increase to reduce recorder writes.",
+          "poll_interval": "How often to poll DeviceList. Minimum 60 seconds. Higher values reduce traffic and DB writes."
+        }
       }
     },
     "abort": {
@@ -37,11 +69,9 @@
         "data": {
           "host": "PVS IP address",
           "port": "WebSocket port",
-          "poll_interval": "DeviceList polling interval (seconds, min 60)",
           "enable_w_sensors": "Expose legacy Watt (W) sensors",
           "enable_devicelist_scan": "Scan DeviceList for lifetime & inverter data",
           "consumption_measure": "How to interpret 'Consumption'",
-          "ws_update_interval": "WebSocket update interval (seconds)",
           "enable_ws_throttle": "Throttle WebSocket updates (reduce DB writes)"
         },
         "data_description": {
@@ -50,8 +80,18 @@
           "enable_w_sensors": "Creates PV/Home/Grid sensors in Watts (W) alongside the kW sensors. Off by default to reduce clutter.",
           "enable_devicelist_scan": "If enabled, the integration periodically calls DeviceList over HTTP to fetch lifetime energy and per‑inverter metrics.",
           "consumption_measure": "House usage (load): net = load − PV. Grid import: treat 'consumption' as grid import when a signed net isn't provided.",
+          "enable_ws_throttle": "If enabled, sensors publish at most once per the interval above. If disabled, publish every WS message."
+        }
+      },
+      "advanced": {
+        "title": "Advanced Settings",
+        "description": "Configure intervals for enabled features.",
+        "data": {
+          "ws_update_interval": "WebSocket update interval (seconds)",
+          "poll_interval": "DeviceList polling interval (seconds, min 60)"
+        },
+        "data_description": {
           "ws_update_interval": "How often to publish state updates from the WebSocket (throttling). Increase to reduce recorder writes.",
-          "enable_ws_throttle": "If enabled, sensors publish at most once per the interval above. If disabled, publish every WS message.",
           "poll_interval": "How often to poll DeviceList. Minimum 60 seconds. Higher values reduce traffic and DB writes."
         }
       }
