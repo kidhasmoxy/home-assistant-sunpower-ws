@@ -478,7 +478,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             identifiers={(DOMAIN, "sunpower_pvs_ws")},
             name="SunPower PVS (WebSocket)",
             manufacturer="SunPower",
-            model="PVS (local WS)",
+            model="PVS WebSocket Gateway",
+            model_id="pvs_ws",
             configuration_url=f"http://{host}",
         )
         

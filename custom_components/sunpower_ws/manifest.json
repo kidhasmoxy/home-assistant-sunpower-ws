@@ -1,7 +1,7 @@
 {
   "domain": "sunpower_ws",
   "name": "SunPower WebSocket (PVS)",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "config_flow": true,
   "documentation": "https://github.com/KidHasMoxy/home-assistant-sunpower-ws",
   "issue_tracker": "https://github.com/KidHasMoxy/home-assistant-sunpower-ws/issues",

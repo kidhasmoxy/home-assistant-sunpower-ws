@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     UnitOfPower,
     UnitOfEnergy,
-    PERCENTAGE,
     UnitOfTemperature,
     UnitOfElectricPotential,
     UnitOfElectricCurrent,
@@ -125,7 +124,8 @@ class GenericLiveSensor(SensorEntity):
             identifiers={(DOMAIN, "sunpower_pvs_ws")},
             name="SunPower PVS (WebSocket)",
             manufacturer="SunPower",
-            model="PVS (local WS)",
+            model="PVS WebSocket Gateway",
+            model_id="pvs_ws",
         )
 
 
@@ -166,7 +166,8 @@ class GridSplitPowerSensor(SensorEntity):
             identifiers={(DOMAIN, "sunpower_pvs_ws")},
             name="SunPower PVS (WebSocket)",
             manufacturer="SunPower",
-            model="PVS (local WS)",
+            model="PVS WebSocket Gateway",
+            model_id="pvs_ws",
         )
 
 
@@ -198,7 +199,8 @@ class LifetimeFromWSSensor(SensorEntity):
             identifiers={(DOMAIN, "sunpower_pvs_ws")},
             name="SunPower PVS (WebSocket)",
             manufacturer="SunPower",
-            model="PVS (local WS)",
+            model="PVS WebSocket Gateway",
+            model_id="pvs_ws",
         )
 
 
@@ -254,7 +256,8 @@ class IntegratingEnergySensor(RestoreEntity, SensorEntity):
             identifiers={(DOMAIN, "sunpower_pvs_ws")},
             name="SunPower PVS (WebSocket)",
             manufacturer="SunPower",
-            model="PVS (local WS)",
+            model="PVS WebSocket Gateway",
+            model_id="pvs_ws",
         )
 
 
@@ -332,7 +335,8 @@ class SiteLifetimeEnergySensor(SensorEntity):
             identifiers={(DOMAIN, "sunpower_pvs_ws")},
             name="SunPower PVS (WebSocket)",
             manufacturer="SunPower",
-            model="PVS (local WS)",
+            model="PVS WebSocket Gateway",
+            model_id="pvs_ws",
         )
 
 
