@@ -14,17 +14,36 @@ _LOGGER = logging.getLogger(__name__)
 class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
+    def __init__(self):
+        """Initialize the config flow."""
+        self._user_input = {}
+
     async def async_step_user(self, user_input=None) -> FlowResult:
+        """Handle the initial step."""
+        errors = {}
+        
         if user_input is not None:
+            # Store current input
+            self._user_input.update(user_input)
+            
+            # Check if we need to show conditional fields
+            if ("enable_devicelist_scan" in user_input or "enable_ws_throttle" in user_input) and \
+               ("poll_interval" not in user_input or "ws_update_interval" not in user_input):
+                # Show step 2 with conditional fields
+                return await self.async_step_user_2()
+            
             # prevent duplicates on same host:port
             for entry in self._async_current_entries(include_ignore=False):
                 if entry.data.get("host") == user_input.get("host") and entry.data.get("port") == user_input.get("port"):
                     return self.async_abort(reason="already_configured")
-            return self.async_create_entry(title=f"SunPower PVS ({user_input.get('host')})", data=user_input)
+            
+            # Create entry with all collected data
+            return self.async_create_entry(title=f"SunPower PVS ({user_input.get('host')})", data=self._user_input)
+        
+        # Build initial schema
         schema = vol.Schema({
             vol.Optional("host", default=DEFAULT_HOST): str,
             vol.Optional("port", default=DEFAULT_PORT): int,
-            vol.Optional("enable_devicelist_scan", default=True): bool,
             vol.Optional("consumption_measure", default="house_usage"): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
@@ -35,11 +54,57 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     multiple=False,
                 )
             ),
-            vol.Optional("ws_update_interval", default=DEFAULT_WS_UPDATE_INTERVAL): int,
+            vol.Optional("enable_devicelist_scan", default=True): bool,
             vol.Optional("enable_ws_throttle", default=True): bool,
-            vol.Optional("poll_interval", default=DEFAULT_POLL_INTERVAL): int,
         })
-        return self.async_show_form(step_id="user", data_schema=schema)
+        
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+
+    async def async_step_user_2(self, user_input=None) -> FlowResult:
+        """Handle the conditional fields step."""
+        errors = {}
+        
+        if user_input is not None:
+            # Merge with previous input
+            self._user_input.update(user_input)
+            
+            # prevent duplicates on same host:port
+            for entry in self._async_current_entries(include_ignore=False):
+                if entry.data.get("host") == self._user_input.get("host") and entry.data.get("port") == self._user_input.get("port"):
+                    return self.async_abort(reason="already_configured")
+            
+            # Create entry with all collected data
+            return self.async_create_entry(title=f"SunPower PVS ({self._user_input.get('host')})", data=self._user_input)
+        
+        # Build conditional schema based on previous selections
+        schema_dict = {}
+        
+        # Show poll_interval only if devicelist scan is enabled
+        if self._user_input.get("enable_devicelist_scan", True):
+            schema_dict[vol.Optional("poll_interval", default=DEFAULT_POLL_INTERVAL)] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=60,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="seconds",
+                )
+            )
+        
+        # Show ws_update_interval only if WS throttle is enabled
+        if self._user_input.get("enable_ws_throttle", True):
+            schema_dict[vol.Optional("ws_update_interval", default=DEFAULT_WS_UPDATE_INTERVAL)] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="seconds",
+                )
+            )
+        
+        # If no conditional fields needed, proceed directly
+        if not schema_dict:
+            return self.async_create_entry(title=f"SunPower PVS ({self._user_input.get('host')})", data=self._user_input)
+        
+        schema = vol.Schema(schema_dict)
+        return self.async_show_form(step_id="user_2", data_schema=schema, errors=errors)
 
     async def async_step_import(self, user_input=None) -> FlowResult:
         return await self.async_step_user(user_input)
@@ -77,28 +142,51 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 reload_even_if_entry_is_unchanged=False,
             )
         
+        # Build schema - show all fields but organize logically
+        schema_dict = {
+            vol.Optional("host", default=current_data.get("host", DEFAULT_HOST)): str,
+            vol.Optional("port", default=current_data.get("port", DEFAULT_PORT)): int,
+            vol.Optional("enable_w_sensors", default=current_data.get("enable_w_sensors", False)): bool,
+            vol.Optional("consumption_measure", default=current_data.get("consumption_measure", "house_usage")): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"label": "House usage (load)", "value": "house_usage"},
+                        {"label": "Grid import (from utility)", "value": "grid_import"},
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    multiple=False,
+                )
+            ),
+            vol.Optional("enable_devicelist_scan", default=current_data.get("enable_devicelist_scan", True)): bool,
+        }
+        
+        # Add poll_interval right after devicelist scan toggle
+        if current_data.get("enable_devicelist_scan", True):
+            schema_dict[vol.Optional("poll_interval", default=current_data.get("poll_interval", DEFAULT_POLL_INTERVAL))] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=60,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="seconds",
+                )
+            )
+        
+        # Add WS throttle toggle
+        schema_dict[vol.Optional("enable_ws_throttle", default=current_data.get("enable_ws_throttle", True))] = bool
+        
+        # Add ws_update_interval right after WS throttle toggle
+        if current_data.get("enable_ws_throttle", True):
+            schema_dict[vol.Optional("ws_update_interval", default=current_data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="seconds",
+                )
+            )
+        
         # Show the reconfigure form
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema({
-                vol.Optional("host", default=current_data.get("host", DEFAULT_HOST)): str,
-                vol.Optional("port", default=current_data.get("port", DEFAULT_PORT)): int,
-                vol.Optional("enable_w_sensors", default=current_data.get("enable_w_sensors", False)): bool,
-                vol.Optional("enable_devicelist_scan", default=current_data.get("enable_devicelist_scan", True)): bool,
-                vol.Optional("consumption_measure", default=current_data.get("consumption_measure", "house_usage")): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=[
-                            {"label": "House usage (load)", "value": "house_usage"},
-                            {"label": "Grid import (from utility)", "value": "grid_import"},
-                        ],
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                        multiple=False,
-                    )
-                ),
-                vol.Optional("enable_ws_throttle", default=current_data.get("enable_ws_throttle", True)): bool,
-                vol.Optional("ws_update_interval", default=current_data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)): int,
-                vol.Optional("poll_interval", default=current_data.get("poll_interval", DEFAULT_POLL_INTERVAL)): int,
-            }),
+            data_schema=vol.Schema(schema_dict),
         )
 
 
@@ -163,57 +251,37 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
                     multiple=False,
                 )
             ),
+            vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True)): bool,
         }
         
-        # Add devicelist scan toggle with conditional fields
-        schema_dict[vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True))] = selector.BooleanSelector(
-            selector.BooleanSelectorConfig(
-                # This is the key - using a selector with show_toggle=True enables dynamic fields
-                show_toggle=True,
+        # Add poll_interval right after devicelist scan toggle if enabled
+        if current.get("enable_devicelist_scan", True):
+            schema_dict[vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL))] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=60,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="seconds",
+                )
             )
-        )
         
-        # Add poll_interval as a conditional field under enable_devicelist_scan
-        schema_dict["poll_interval"] = selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=60,
-                mode=selector.NumberSelectorMode.BOX,
-                unit_of_measurement="seconds",
-                # This makes the field conditional on the toggle above
-                required=current.get("enable_devicelist_scan", True),
+        # Add WS throttle toggle
+        schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = bool
+        
+        # Add ws_update_interval right after WS throttle toggle if enabled
+        if current.get("enable_ws_throttle", True):
+            schema_dict[vol.Optional("ws_update_interval", default=current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL))] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="seconds",
+                )
             )
-        )
-        
-        # Add throttle toggle with conditional fields
-        schema_dict[vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True))] = selector.BooleanSelector(
-            selector.BooleanSelectorConfig(
-                show_toggle=True,
-            )
-        )
-        
-        # Add ws_update_interval as a conditional field under enable_ws_throttle
-        schema_dict["ws_update_interval"] = selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=1,
-                mode=selector.NumberSelectorMode.BOX,
-                unit_of_measurement="seconds",
-                # This makes the field conditional on the toggle above
-                required=current.get("enable_ws_throttle", True),
-            )
-        )
-        
-        # Set default values for the conditional fields
-        defaults = {
-            "poll_interval": current.get("poll_interval", DEFAULT_POLL_INTERVAL),
-            "ws_update_interval": current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL),
-        }
         
         schema = vol.Schema(schema_dict)
         return self.async_show_form(
             step_id="init", 
             data_schema=schema, 
             errors=errors,
-            description_placeholders=defaults,
             last_step=True
         )
 
