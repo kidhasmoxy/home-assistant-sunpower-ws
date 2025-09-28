@@ -9,6 +9,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorStateClass,
 )
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.const import (
     UnitOfPower,
     UnitOfEnergy,
@@ -55,7 +56,7 @@ class ConnectionStatusSensor(SensorEntity):
     _attr_name = "WebSocket Connection"
     _attr_unique_id = f"{DOMAIN}_websocket_connection"
     _attr_icon = "mdi:wifi"
-    _attr_entity_category = "diagnostic"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, hub: SunPowerWSHub):
         self._hub = hub

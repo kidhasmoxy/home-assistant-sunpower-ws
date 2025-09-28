@@ -89,8 +89,8 @@ class SunPowerWSHub:
         if not self._session:
             self._session = aiohttp.ClientSession()
             
-        # Start the WebSocket runner task (non-blocking)
-        self._task = self.hass.async_create_task(
+        # Use hass.async_create_background_task for proper lifecycle management
+        self._task = self.hass.async_create_background_task(
             self._runner(),
             name="SunPowerWS WebSocket Runner"
         )
@@ -98,7 +98,7 @@ class SunPowerWSHub:
         # Start the DeviceList poller if enabled (non-blocking)
         if self.enable_devicelist_scan:
             _LOGGER.debug("Starting DeviceList poller with interval %s seconds", self.poll_interval)
-            self._poll_task = self.hass.async_create_task(
+            self._poll_task = self.hass.async_create_background_task(
                 self._devicelist_poller(),
                 name="SunPowerWS DeviceList Poller"
             )
@@ -496,18 +496,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, host, port, poll_interval, enable_devicelist_scan, 
             ws_update_interval, consumption_measure, enable_ws_throttle
         )
-        hass.data.setdefault(DOMAIN, {})["hub"] = hub
+        hass.data[DOMAIN] = hub
         
-        # Start the hub in background to ensure fast bootup
+        # Start hub with proper error handling and lifecycle management
         try:
-            # Create background task without awaiting to prevent bootstrap blocking
-            hass.async_create_task(
-                hub.async_start(),
-                name="SunPowerWS Hub Background Startup"
-            )
-            _LOGGER.info("SunPower WebSocket hub background startup scheduled")
+            await hub.async_start()
+            _LOGGER.info("SunPower WebSocket hub started successfully")
         except Exception as ex:
-            _LOGGER.warning("Error scheduling SunPower WebSocket hub startup: %s", ex)
+            _LOGGER.warning("Error starting SunPower WebSocket hub: %s. Integration will continue with limited functionality.", ex)
+            # Don't raise - allow integration to continue without WebSocket
         
         # Set up the sensor platform
         _LOGGER.debug("Setting up sensor platform")
@@ -525,16 +522,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    hub: SunPowerWSHub = hass.data.get(DOMAIN, {}).get("hub")
+    
+    # Clean up the hub
+    hub: SunPowerWSHub = hass.data.get(DOMAIN)
     if hub:
         await hub.async_stop()
+    
+    # Clean up data storage
+    if DOMAIN in hass.data:
+        del hass.data[DOMAIN]
+    
     return unload_ok
 
 
 @callback
 def get_hub(hass: HomeAssistant) -> SunPowerWSHub | None:
-    return hass.data.get(DOMAIN, {}).get("hub")
+    return hass.data.get(DOMAIN)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
