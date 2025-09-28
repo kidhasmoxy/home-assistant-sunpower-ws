@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Optional, Set
 
@@ -81,12 +80,13 @@ class ConnectionStatusSensor(SensorEntity):
         # Listen for any WebSocket data to detect connection
         self._hub.add_listener(_connection_listener)
         
-        # Check connection status periodically
-        async def _check_connection():
-            """Periodically check if connection is still active."""
+        # Schedule periodic connection checks using Home Assistant's call_later
+        def schedule_next_check():
+            """Schedule the next connection check."""
             import time
-            while True:
-                await asyncio.sleep(30)  # Check every 30 seconds
+            
+            def check_connection_state():
+                """Check connection state and schedule next check."""
                 if self._last_update is None:
                     # Never received data
                     if self._attr_native_value != "Connecting":
@@ -98,9 +98,15 @@ class ConnectionStatusSensor(SensorEntity):
                         self._attr_native_value = "Disconnected"
                         self._attr_icon = "mdi:wifi-off"
                         self.async_write_ha_state()
+                
+                # Schedule next check
+                schedule_next_check()
+            
+            # Schedule check in 30 seconds
+            self.hass.loop.call_later(30, check_connection_state)
         
-        # Start the connection checker
-        self.hass.async_create_task(_check_connection())
+        # Start the periodic checking
+        schedule_next_check()
 
     @property
     def extra_state_attributes(self) -> dict:

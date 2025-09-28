@@ -89,7 +89,7 @@ class SunPowerWSHub:
         if not self._session:
             self._session = aiohttp.ClientSession()
             
-        # Use hass.async_create_background_task for proper lifecycle management
+        # Use background tasks (HA 2023.9+) to avoid bootstrap tracking
         self._task = self.hass.async_create_background_task(
             self._runner(),
             name="SunPowerWS WebSocket Runner"
@@ -450,7 +450,11 @@ class SunPowerWSHub:
 
     @callback
     def _on_hass_stop(self, _event):
-        self.hass.async_create_task(self.async_stop())
+        # Use background task to avoid blocking shutdown
+        self.hass.async_create_background_task(
+            self.async_stop(),
+            name="SunPowerWS Hub Shutdown"
+        )
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -506,9 +510,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Error starting SunPower WebSocket hub: %s. Integration will continue with limited functionality.", ex)
             # Don't raise - allow integration to continue without WebSocket
         
-        # Set up the sensor platform
-        _LOGGER.debug("Setting up sensor platform")
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Set up the sensor platform (delay to avoid bootstrap blocking)
+        def setup_platforms():
+            """Set up platforms after a brief delay."""
+            hass.async_create_background_task(
+                hass.config_entries.async_forward_entry_setups(entry, PLATFORMS),
+                name="SunPowerWS Platform Setup"
+            )
+            _LOGGER.debug("Sensor platform setup initiated")
+        
+        # Delay platform setup slightly to avoid bootstrap blocking
+        hass.loop.call_later(0.1, setup_platforms)
         
         # Reload integration when options change
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
