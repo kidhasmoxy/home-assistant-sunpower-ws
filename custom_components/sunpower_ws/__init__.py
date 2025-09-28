@@ -99,23 +99,28 @@ class SunPowerWSHub:
             try:
                 _LOGGER.info("Connecting to SunPower PVS WS at %s", url)
                 assert self._session is not None
-                async with self._session.ws_connect(url, heartbeat=30) as ws:
-                    self._ws = ws
-                    backoff = 1
-                    async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            try:
-                                data = json.loads(msg.data)
-                            except Exception:
-                                _LOGGER.debug("Non-JSON message: %s", msg.data)
-                                continue
-                            normalized = self._normalize_payload(data)
-                            if normalized:
-                                for cb in self._listeners:
-                                    cb(normalized)
-                        elif msg.type == aiohttp.WSMsgType.ERROR:
-                            _LOGGER.warning("WS error: %s", ws.exception())
-                            break
+                # Add connection timeout to prevent hanging
+                try:
+                    async with asyncio.timeout(10):  # 10 second timeout for connection
+                        async with self._session.ws_connect(url, heartbeat=30) as ws:
+                            self._ws = ws
+                            backoff = 1
+                            async for msg in ws:
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    try:
+                                        data = json.loads(msg.data)
+                                    except Exception:
+                                        _LOGGER.debug("Non-JSON message: %s", msg.data)
+                                        continue
+                                    normalized = self._normalize_payload(data)
+                                    if normalized:
+                                        for cb in self._listeners:
+                                            cb(normalized)
+                                elif msg.type == aiohttp.WSMsgType.ERROR:
+                                    _LOGGER.warning("WS error: %s", ws.exception())
+                                    break
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("Timeout connecting to SunPower PVS at %s", url)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -129,16 +134,22 @@ class SunPowerWSHub:
         while not self._stopped.is_set():
             try:
                 assert self._session is not None
-                async with self._session.get(url, timeout=20) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        parsed = self._parse_devicelist(data)
-                        for cb in self._devicelist_listeners:
-                            cb(parsed)
-                        backoff = self.poll_interval
-                    else:
-                        _LOGGER.debug("DeviceList HTTP %s", resp.status)
-                        backoff = min(max(60, backoff * 2), 3600)
+                try:
+                    # Use asyncio.timeout for the entire operation
+                    async with asyncio.timeout(20):
+                        async with self._session.get(url, timeout=15) as resp:
+                            if resp.status == 200:
+                                data = await resp.json(content_type=None)
+                                parsed = self._parse_devicelist(data)
+                                for cb in self._devicelist_listeners:
+                                    cb(parsed)
+                                backoff = self.poll_interval
+                            else:
+                                _LOGGER.debug("DeviceList HTTP %s", resp.status)
+                                backoff = min(max(60, backoff * 2), 3600)
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("Timeout fetching DeviceList from %s", url)
+                    backoff = min(max(60, backoff * 2), 3600)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -317,7 +328,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     hub = SunPowerWSHub(hass, host, port, poll_interval, enable_devicelist_scan, ws_update_interval, consumption_measure, enable_ws_throttle)
     hass.data.setdefault(DOMAIN, {})["hub"] = hub
-    await hub.async_start()
+    
+    try:
+        # Start the hub with a timeout to prevent bootstrap hanging
+        async with asyncio.timeout(30):  # 30 second timeout for startup
+            await hub.async_start()
+    except asyncio.TimeoutError:
+        _LOGGER.warning("Timeout starting SunPower WebSocket hub. Continuing setup with limited functionality.")
+        # We'll continue setup even if the hub doesn't fully start
+    
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Reload integration when options change
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

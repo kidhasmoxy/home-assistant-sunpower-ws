@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import voluptuous as vol
 
@@ -81,11 +82,18 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     options["poll_interval"] = max(60, int(user_input["poll_interval"]))
                 elif options["enable_devicelist_scan"]:
                     options["poll_interval"] = current.get("poll_interval", DEFAULT_POLL_INTERVAL)
-                    
-                # Update the entry with new options
-                self.hass.config_entries.async_update_entry(entry, data={}, options=options)
-                await self.hass.config_entries.async_reload(entry.entry_id)
-                return self.async_abort(reason="reconfigured")
+                
+                try:    
+                    # Update the entry with new options
+                    self.hass.config_entries.async_update_entry(entry, data={}, options=options)
+                    # Try to reload with a timeout to prevent hanging
+                    await asyncio.wait_for(self.hass.config_entries.async_reload(entry.entry_id), timeout=30)
+                    return self.async_abort(reason="reconfigured")
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("Timeout during reconfiguration reload, but options were saved")
+                    errors["base"] = "timeout"
+                    # Even though we had a timeout, the options were saved, so we can still return success
+                    return self.async_abort(reason="reconfigured")
             except Exception as ex:
                 errors["base"] = "unknown"
                 _LOGGER.exception("Unexpected exception during reconfiguration: %s", ex)

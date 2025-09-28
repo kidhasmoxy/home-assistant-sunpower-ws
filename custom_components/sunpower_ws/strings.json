@@ -64,6 +64,10 @@
       "already_configured": "This SunPower PVS is already configured.",
       "reconfigured": "Options saved. Integration reloaded.",
       "unknown": "Unknown configuration entry."
+    },
+    "error": {
+      "timeout": "Timeout during connection. Options were saved, but connection may be unreliable.",
+      "unknown": "Unexpected error occurred."
     }
   },
   "options": {
