@@ -7,7 +7,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
-from . import DOMAIN, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_POLL_INTERVAL, DEFAULT_WS_UPDATE_INTERVAL
+from . import DOMAIN, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WS_UPDATE_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,8 +28,6 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=f"SunPower PVS ({user_input.get('host')})", data=user_input)
         
         # Build schema with all fields organized logically
-        # Note: Home Assistant doesn't support true conditional fields in config flows,
-        # so we show all fields but organize them logically
         schema = vol.Schema({
             vol.Optional("host", default=DEFAULT_HOST): str,
             vol.Optional("port", default=DEFAULT_PORT): int,
@@ -41,14 +39,6 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                     multiple=False,
-                )
-            ),
-            vol.Optional("enable_devicelist_scan", default=True): bool,
-            vol.Optional("poll_interval", default=DEFAULT_POLL_INTERVAL): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=60,
-                    mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="seconds",
                 )
             ),
             vol.Optional("enable_ws_throttle", default=True): bool,
@@ -84,11 +74,9 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data = {
                 "host": user_input.get("host", current_data.get("host", DEFAULT_HOST)),
                 "port": user_input.get("port", current_data.get("port", DEFAULT_PORT)),
-                "enable_devicelist_scan": user_input.get("enable_devicelist_scan", current_data.get("enable_devicelist_scan", True)),
                 "consumption_measure": user_input.get("consumption_measure", current_data.get("consumption_measure", "house_usage")),
                 "ws_update_interval": user_input.get("ws_update_interval", current_data.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)),
                 "enable_ws_throttle": user_input.get("enable_ws_throttle", current_data.get("enable_ws_throttle", True)),
-                "poll_interval": user_input.get("poll_interval", current_data.get("poll_interval", DEFAULT_POLL_INTERVAL)),
                 "enable_w_sensors": user_input.get("enable_w_sensors", current_data.get("enable_w_sensors", False)),
             }
             
@@ -112,14 +100,6 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                     multiple=False,
-                )
-            ),
-            vol.Optional("enable_devicelist_scan", default=current_data.get("enable_devicelist_scan", True)): bool,
-            vol.Optional("poll_interval", default=current_data.get("poll_interval", DEFAULT_POLL_INTERVAL)): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=60,
-                    mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="seconds",
                 )
             ),
             vol.Optional("enable_ws_throttle", default=current_data.get("enable_ws_throttle", True)): bool,
@@ -154,8 +134,8 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
                 options = {}
                 # Copy existing options first
                 for key, value in current.items():
-                    if key not in ["host", "port", "enable_w_sensors", "enable_devicelist_scan", 
-                                "consumption_measure", "enable_ws_throttle", "ws_update_interval", "poll_interval"]:
+                    if key not in ["host", "port", "enable_w_sensors", 
+                                "consumption_measure", "enable_ws_throttle", "ws_update_interval"]:
                         options[key] = value
                         
                 # Update with new values
@@ -163,7 +143,6 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
                     "host": user_input.get("host", current.get("host")),
                     "port": int(user_input.get("port", current.get("port", DEFAULT_PORT))),
                     "enable_w_sensors": bool(user_input.get("enable_w_sensors", current.get("enable_w_sensors", False))),
-                    "enable_devicelist_scan": bool(user_input.get("enable_devicelist_scan", current.get("enable_devicelist_scan", True))),
                     "consumption_measure": user_input.get("consumption_measure", current.get("consumption_measure", "house_usage")),
                     "enable_ws_throttle": bool(user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))),
                 })
@@ -173,11 +152,6 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
                     options["ws_update_interval"] = max(1, int(user_input["ws_update_interval"]))
                 elif options["enable_ws_throttle"]:
                     options["ws_update_interval"] = current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
-                    
-                if "poll_interval" in user_input and options["enable_devicelist_scan"]:
-                    options["poll_interval"] = max(60, int(user_input["poll_interval"]))
-                elif options["enable_devicelist_scan"]:
-                    options["poll_interval"] = current.get("poll_interval", DEFAULT_POLL_INTERVAL)
                     
                 # Update the entry with new options
                 self.hass.config_entries.async_update_entry(self.config_entry, data={}, options=options)
@@ -199,14 +173,6 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                     multiple=False,
-                )
-            ),
-            vol.Optional("enable_devicelist_scan", default=current.get("enable_devicelist_scan", True)): bool,
-            vol.Optional("poll_interval", default=current.get("poll_interval", DEFAULT_POLL_INTERVAL)): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=60,
-                    mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="seconds",
                 )
             ),
             vol.Optional("enable_ws_throttle", default=current.get("enable_ws_throttle", True)): bool,

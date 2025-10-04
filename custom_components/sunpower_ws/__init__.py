@@ -16,7 +16,6 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_HOST = "172.27.153.1"
 DEFAULT_PORT = 9002
-DEFAULT_POLL_INTERVAL = 300  # seconds
 DEFAULT_WS_UPDATE_INTERVAL = 5  # seconds for throttling WS-driven sensor writes
 WS_PATH = "/"
 
@@ -46,32 +45,25 @@ FIELD_MAP = {
 
 
 class SunPowerWSHub:
-    """WebSocket client + optional low-rate DeviceList poller."""
+    """WebSocket client for SunPower PVS."""
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, poll_interval: int, enable_devicelist_scan: bool, ws_update_interval: int, consumption_measure: str, enable_ws_throttle: bool):
+    def __init__(self, hass: HomeAssistant, host: str, port: int, ws_update_interval: int, consumption_measure: str, enable_ws_throttle: bool):
         self.hass = hass
         self.host = host
         self.port = port
-        self.poll_interval = max(60, int(poll_interval or DEFAULT_POLL_INTERVAL))
-        self.enable_devicelist_scan = enable_devicelist_scan
         self.ws_update_interval = max(1, int(ws_update_interval or DEFAULT_WS_UPDATE_INTERVAL))
         self.consumption_measure = consumption_measure or "house_usage"
         self.enable_ws_throttle = bool(enable_ws_throttle)
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._listeners: list[Callable[[dict], None]] = []
-        self._devicelist_listeners: list[Callable[[dict], None]] = []
         self._task: Optional[asyncio.Task] = None
-        self._poll_task: Optional[asyncio.Task] = None
         self._stopped = asyncio.Event()
         self._connected = False
         self._last_connection_attempt = 0
 
     def add_listener(self, cb: Callable[[dict], None]) -> None:
         self._listeners.append(cb)
-
-    def add_devicelist_listener(self, cb: Callable[[dict], None]) -> None:
-        self._devicelist_listeners.append(cb)
 
     async def async_start(self) -> None:
         """Start the hub and connect to the WebSocket."""
@@ -94,19 +86,11 @@ class SunPowerWSHub:
             self._runner(),
             name="SunPowerWS WebSocket Runner"
         )
-        
-        # Start the DeviceList poller if enabled (non-blocking)
-        if self.enable_devicelist_scan:
-            _LOGGER.debug("Starting DeviceList poller with interval %s seconds", self.poll_interval)
-            self._poll_task = self.hass.async_create_background_task(
-                self._devicelist_poller(),
-                name="SunPowerWS DeviceList Poller"
-            )
             
         # Register stop handler
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_hass_stop)
         
-        _LOGGER.debug("SunPowerWSHub startup initiated (tasks started)")
+        _LOGGER.debug("SunPowerWSHub startup initiated (WebSocket task started)")
 
     async def async_stop(self) -> None:
         """Stop the hub and clean up resources."""
@@ -122,20 +106,19 @@ class SunPowerWSHub:
             except Exception as e:
                 _LOGGER.warning("Error closing WebSocket connection: %s", e)
         
-        # Cancel and wait for tasks to complete
-        for task_name, task in [("WebSocket", self._task), ("DeviceList poller", self._poll_task)]:
-            if task:
-                try:
-                    if not task.done():
-                        task.cancel()
-                        try:
-                            await asyncio.wait_for(task, timeout=5)
-                        except asyncio.TimeoutError:
-                            _LOGGER.warning("%s task did not complete in time", task_name)
-                        except asyncio.CancelledError:
-                            pass
-                except Exception as e:
-                    _LOGGER.warning("Error cancelling %s task: %s", task_name, e)
+        # Cancel and wait for WebSocket task to complete
+        if self._task:
+            try:
+                if not self._task.done():
+                    self._task.cancel()
+                    try:
+                        await asyncio.wait_for(self._task, timeout=5)
+                    except asyncio.TimeoutError:
+                        _LOGGER.warning("WebSocket task did not complete in time")
+                    except asyncio.CancelledError:
+                        pass
+            except Exception as e:
+                _LOGGER.warning("Error cancelling WebSocket task: %s", e)
         
         # Close the HTTP session
         if self._session:
@@ -235,157 +218,6 @@ class SunPowerWSHub:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 
-    async def _devicelist_poller(self) -> None:
-        """Poll the DeviceList API periodically for inverter data."""
-        url = f"http://{self.host}/cgi-bin/dl_cgi?Command=DeviceList"
-        backoff = self.poll_interval
-        poll_count = 0
-        success_count = 0
-        error_count = 0
-        
-        _LOGGER.debug("Starting DeviceList poller with interval %s seconds", self.poll_interval)
-        
-        while not self._stopped.is_set():
-            poll_count += 1
-            try:
-                if self._session is None:
-                    _LOGGER.warning("HTTP session is None, creating new session")
-                    self._session = aiohttp.ClientSession()
-                    
-                try:
-                    # Use asyncio.timeout for the entire operation
-                    async with asyncio.timeout(20):
-                        try:
-                            async with self._session.get(url, timeout=15) as resp:
-                                if resp.status == 200:
-                                    data = await resp.json(content_type=None)
-                                    parsed = self._parse_devicelist(data)
-                                    
-                                    # Notify listeners
-                                    for cb in self._devicelist_listeners:
-                                        try:
-                                            cb(parsed)
-                                        except Exception as cb_error:
-                                            _LOGGER.error("Error in DeviceList callback: %s", cb_error)
-                                    
-                                    # Reset backoff on success
-                                    backoff = self.poll_interval
-                                    success_count += 1
-                                    
-                                    # Log success periodically
-                                    if success_count % 10 == 0:
-                                        _LOGGER.debug("DeviceList poll success count: %s", success_count)
-                                else:
-                                    _LOGGER.warning("DeviceList HTTP error: %s", resp.status)
-                                    backoff = min(max(60, backoff * 2), 3600)
-                                    error_count += 1
-                        except aiohttp.ClientError as client_error:
-                            _LOGGER.warning("DeviceList HTTP client error: %s", client_error)
-                            backoff = min(max(60, backoff * 2), 3600)
-                            error_count += 1
-                except asyncio.TimeoutError:
-                    _LOGGER.warning("Timeout fetching DeviceList from %s", url)
-                    backoff = min(max(60, backoff * 2), 3600)
-                    error_count += 1
-            except asyncio.CancelledError:
-                _LOGGER.info("DeviceList poller cancelled")
-                break
-            except Exception as e:
-                _LOGGER.error("DeviceList poll error: %s", e)
-                backoff = min(max(60, backoff * 2), 3600)
-                error_count += 1
-                
-            # Log error stats periodically
-            if error_count > 0 and error_count % 5 == 0:
-                _LOGGER.warning("DeviceList poll errors: %s/%s", error_count, poll_count)
-                
-            # Wait before next poll
-            try:
-                await asyncio.sleep(backoff)
-            except asyncio.CancelledError:
-                _LOGGER.info("DeviceList poller sleep cancelled")
-                break
-                
-        _LOGGER.info("DeviceList poller stopped after %s polls (%s successful, %s errors)",
-                     poll_count, success_count, error_count)
-
-    def _parse_devicelist(self, data: dict) -> dict:
-        result: dict[str, Any] = {"site_lifetime_kwh": None, "inverters": []}
-        devices = []
-        if isinstance(data, dict):
-            if "devices" in data and isinstance(data["devices"], list):
-                devices = data["devices"]
-            elif "DeviceList" in data and isinstance(data["DeviceList"], dict):
-                if isinstance(data["DeviceList"].get("devices"), list):
-                    devices = data["DeviceList"]["devices"]
-
-        total_kwh = 0.0
-        any_kwh = False
-        for d in devices or []:
-            inv = self._extract_inverter_metrics(d)
-            if inv:
-                result["inverters"].append(inv)
-                if inv.get("lifetime_kwh") is not None:
-                    total_kwh += inv["lifetime_kwh"]
-                    any_kwh = True
-
-        if any_kwh:
-            result["site_lifetime_kwh"] = total_kwh
-        return result
-
-    def _extract_inverter_metrics(self, dev: dict):
-        if not isinstance(dev, dict):
-            return None
-        name = str(dev.get("name") or dev.get("DeviceName") or dev.get("model") or dev.get("Model") or "device")
-        dtype = str(dev.get("type") or dev.get("DeviceType") or "").lower()
-        serial = str(dev.get("serial") or dev.get("SerialNumber") or dev.get("id") or dev.get("DeviceID") or name)
-        looks_inverter = ("invert" in dtype) or ("invert" in name.lower()) or ("micro" in name.lower())
-
-        lifetime_kwh = None
-        def scan_for_lifetime(d: dict):
-            nonlocal lifetime_kwh
-            for k, v in d.items():
-                if isinstance(v, dict):
-                    scan_for_lifetime(v)
-                else:
-                    kl = str(k).lower()
-                    if ("lifetime" in kl) and ("energy" in kl or "ac" in kl):
-                        try:
-                            val = float(v)
-                        except Exception:
-                            continue
-                        if "wh" in kl and val > 1000:
-                            lifetime_kwh = val / 1000.0
-                        elif "kwh" in kl:
-                            lifetime_kwh = val
-                        else:
-                            lifetime_kwh = val / 1000.0 if val > 5000 else val
-        scan_for_lifetime(dev)
-
-        def _first_num(dct, keys):
-            for k in keys:
-                v = dct.get(k)
-                if isinstance(v, (int, float)):
-                    return float(v)
-            return None
-
-        ac_w = _first_num(dev, ["ac_w", "ac_power", "acwatts", "ac_watts", "acp"])
-        dc_v = _first_num(dev, ["dc_v", "dc_voltage", "dcv"])
-        dc_a = _first_num(dev, ["dc_a", "dc_current", "dca"])
-        temp_c = _first_num(dev, ["temp_c", "temperature_c", "temperature"])
-
-        if lifetime_kwh is None and not looks_inverter:
-            return None
-
-        return {
-            "id": serial or name,
-            "name": name,
-            "lifetime_kwh": lifetime_kwh,
-            "ac_w": ac_w,
-            "dc_v": dc_v,
-            "dc_a": dc_a,
-            "temp_c": temp_c,
-        }
 
     def _normalize_payload(self, data: dict) -> Dict[str, Any]:
         if not isinstance(data, dict):
@@ -470,17 +302,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cfg = {**entry.data, **entry.options}
         host = cfg.get("host", DEFAULT_HOST)
         port = cfg.get("port", DEFAULT_PORT)
-        poll_interval = cfg.get("poll_interval", DEFAULT_POLL_INTERVAL)
-        enable_devicelist_scan = cfg.get("enable_devicelist_scan", True)
         ws_update_interval = cfg.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
         consumption_measure = cfg.get("consumption_measure", "house_usage")
         enable_ws_throttle = cfg.get("enable_ws_throttle", True)
         
         _LOGGER.debug(
-            "Configuration: host=%s, port=%s, poll_interval=%s, enable_devicelist_scan=%s, "
-            "ws_update_interval=%s, consumption_measure=%s, enable_ws_throttle=%s",
-            host, port, poll_interval, enable_devicelist_scan, 
-            ws_update_interval, consumption_measure, enable_ws_throttle
+            "Configuration: host=%s, port=%s, ws_update_interval=%s, consumption_measure=%s, enable_ws_throttle=%s",
+            host, port, ws_update_interval, consumption_measure, enable_ws_throttle
         )
         
         # Register the device in the device registry
@@ -497,8 +325,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
         # Create and store the hub instance
         hub = SunPowerWSHub(
-            hass, host, port, poll_interval, enable_devicelist_scan, 
-            ws_update_interval, consumption_measure, enable_ws_throttle
+            hass, host, port, ws_update_interval, consumption_measure, enable_ws_throttle
         )
         hass.data[DOMAIN] = hub
         
