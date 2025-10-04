@@ -95,41 +95,42 @@ class SunPowerWSHub:
     async def async_stop(self) -> None:
         """Stop the hub and clean up resources."""
         _LOGGER.debug("Stopping SunPowerWSHub")
+        
+        # Signal stop to all running tasks
         self._stopped.set()
         
-        # Close the WebSocket connection
-        if self._ws:
+        # Cancel and wait for WebSocket task to complete
+        if self._task and not self._task.done():
+            self._task.cancel()
             try:
-                if not self._ws.closed:
-                    await self._ws.close()
-                self._ws = None
+                await asyncio.wait_for(self._task, timeout=5)
+            except asyncio.TimeoutError:
+                _LOGGER.warning("WebSocket task did not complete in time")
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                _LOGGER.warning("Error waiting for WebSocket task: %s", e)
+        
+        # Close the WebSocket connection
+        if self._ws and not self._ws.closed:
+            try:
+                await self._ws.close()
             except Exception as e:
                 _LOGGER.warning("Error closing WebSocket connection: %s", e)
         
-        # Cancel and wait for WebSocket task to complete
-        if self._task:
-            try:
-                if not self._task.done():
-                    self._task.cancel()
-                    try:
-                        await asyncio.wait_for(self._task, timeout=5)
-                    except asyncio.TimeoutError:
-                        _LOGGER.warning("WebSocket task did not complete in time")
-                    except asyncio.CancelledError:
-                        pass
-            except Exception as e:
-                _LOGGER.warning("Error cancelling WebSocket task: %s", e)
-        
         # Close the HTTP session
-        if self._session:
+        if self._session and not self._session.closed:
             try:
                 await self._session.close()
-                self._session = None
             except Exception as e:
                 _LOGGER.warning("Error closing HTTP session: %s", e)
-                
-        # Reset connection status
+        
+        # Clear references
+        self._ws = None
+        self._session = None
+        self._task = None
         self._connected = False
+        
         _LOGGER.debug("SunPowerWSHub stopped successfully")
 
     async def _runner(self) -> None:
@@ -362,15 +363,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
-    # Clean up the hub
+    # Stop the hub first before unloading platforms
     hub: SunPowerWSHub = hass.data.get(DOMAIN)
     if hub:
-        await hub.async_stop()
+        try:
+            await hub.async_stop()
+        except Exception as ex:
+            _LOGGER.warning("Error stopping hub during unload: %s", ex)
     
-    # Clean up data storage
-    if DOMAIN in hass.data:
+    # Unload platforms
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    
+    # Clean up data storage only if unload was successful
+    if unload_ok and DOMAIN in hass.data:
         del hass.data[DOMAIN]
     
     return unload_ok
