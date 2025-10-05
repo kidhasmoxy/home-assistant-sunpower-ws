@@ -71,13 +71,14 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         if user_input is not None:
             # Process the user input and update the config entry
+            # Note: Unchecked checkboxes don't appear in user_input, so default to False
             new_data = {
                 "host": user_input.get("host", DEFAULT_HOST),
                 "port": user_input.get("port", DEFAULT_PORT),
                 "consumption_measure": user_input.get("consumption_measure", "house_usage"),
                 "ws_update_interval": user_input.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL),
-                "enable_ws_throttle": user_input.get("enable_ws_throttle", True),
-                "enable_w_sensors": user_input.get("enable_w_sensors", False),
+                "enable_ws_throttle": user_input.get("enable_ws_throttle", False),  # False if unchecked
+                "enable_w_sensors": user_input.get("enable_w_sensors", False),  # False if unchecked
             }
             
             _LOGGER.debug("Reconfigure: Updating config entry with new data: %s", new_data)
@@ -141,19 +142,15 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
                         options[key] = value
                         
                 # Update with new values
+                # Note: Unchecked checkboxes don't appear in user_input, so we check with "in" operator
                 options.update({
                     "host": user_input.get("host", current.get("host")),
                     "port": int(user_input.get("port", current.get("port", DEFAULT_PORT))),
-                    "enable_w_sensors": bool(user_input.get("enable_w_sensors", current.get("enable_w_sensors", False))),
+                    "enable_w_sensors": user_input.get("enable_w_sensors", False),  # False if not in user_input
                     "consumption_measure": user_input.get("consumption_measure", current.get("consumption_measure", "house_usage")),
-                    "enable_ws_throttle": bool(user_input.get("enable_ws_throttle", current.get("enable_ws_throttle", True))),
+                    "enable_ws_throttle": user_input.get("enable_ws_throttle", False),  # False if not in user_input
+                    "ws_update_interval": max(1, int(user_input.get("ws_update_interval", current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)))),
                 })
-                
-                # Add interval settings if provided
-                if "ws_update_interval" in user_input and options["enable_ws_throttle"]:
-                    options["ws_update_interval"] = max(1, int(user_input["ws_update_interval"]))
-                elif options["enable_ws_throttle"]:
-                    options["ws_update_interval"] = current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)
                     
                 # Update the entry with new options
                 self.hass.config_entries.async_update_entry(self.config_entry, data={}, options=options)
