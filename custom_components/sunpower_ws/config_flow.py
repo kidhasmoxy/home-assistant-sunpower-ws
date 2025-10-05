@@ -83,10 +83,16 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             
             _LOGGER.debug("Reconfigure: Updating config entry with data: %s", data_updates)
             
-            # Update the config entry and reload
+            # Clear options so data takes precedence, then update data and reload
+            # This ensures the new values in data aren't overridden by old values in options
+            self.hass.config_entries.async_update_entry(
+                reconfigure_entry,
+                data=data_updates,
+                options={},  # Clear options to prevent override
+            )
+            
             return self.async_update_reload_and_abort(
                 reconfigure_entry,
-                data_updates=data_updates,
                 reload_even_if_entry_is_unchanged=True,
             )
         
