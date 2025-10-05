@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Callable, Dict, Optional
 
 import aiohttp
@@ -139,7 +140,6 @@ class SunPowerWSHub:
         while not self._stopped.is_set():
             try:
                 # Only log connection attempts if we're not connected or it's been a while
-                import time
                 now = time.time()
                 if not self._connected or (now - self._last_connection_attempt) > 60:
                     _LOGGER.info("Connecting to SunPower PVS WS at %s", url)
@@ -153,8 +153,10 @@ class SunPowerWSHub:
                 try:
                     # Use shorter timeout during startup to prevent bootstrap delays
                     timeout_duration = 5 if not self._connected else 10
-                    async with asyncio.timeout(timeout_duration):
-                        self._ws = await self._session.ws_connect(url, heartbeat=30)
+                    self._ws = await asyncio.wait_for(
+                        self._session.ws_connect(url, heartbeat=30),
+                        timeout=timeout_duration
+                    )
                     
                     if not self._connected:
                         _LOGGER.info("Successfully connected to WebSocket at %s", url)
@@ -324,11 +326,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             configuration_url=f"http://{host}",
         )
         
-        # Create and store the hub instance
+        # Create and store the hub instance in entry.runtime_data (HA best practice)
         hub = SunPowerWSHub(
             hass, host, port, ws_update_interval, consumption_measure, enable_ws_throttle
         )
-        hass.data[DOMAIN] = hub
+        entry.runtime_data = hub
         
         # Start hub with proper error handling and lifecycle management
         try:
@@ -338,17 +340,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Error starting SunPower WebSocket hub: %s. Integration will continue with limited functionality.", ex)
             # Don't raise - allow integration to continue without WebSocket
         
-        # Set up the sensor platform (delay to avoid bootstrap blocking)
-        def setup_platforms():
-            """Set up platforms after a brief delay."""
-            hass.async_create_background_task(
-                hass.config_entries.async_forward_entry_setups(entry, PLATFORMS),
-                name="SunPowerWS Platform Setup"
-            )
-            _LOGGER.debug("Sensor platform setup initiated")
-        
-        # Delay platform setup slightly to avoid bootstrap blocking
-        hass.loop.call_later(0.1, setup_platforms)
+        # Set up the sensor platform (must be awaited during setup)
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         
         # Reload integration when options change
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -363,27 +356,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    # Stop the hub first before unloading platforms
-    hub: SunPowerWSHub = hass.data.get(DOMAIN)
-    if hub:
-        try:
-            await hub.async_stop()
-        except Exception as ex:
-            _LOGGER.warning("Error stopping hub during unload: %s", ex)
+    _LOGGER.debug("Unloading SunPower WebSocket integration for entry: %s", entry.entry_id)
     
-    # Unload platforms
+    # Unload platforms first
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
-    # Clean up data storage only if unload was successful
-    if unload_ok and DOMAIN in hass.data:
-        del hass.data[DOMAIN]
+    # Only clean up hub if platforms unloaded successfully
+    if unload_ok:
+        try:
+            await entry.runtime_data.async_stop()
+        except Exception as ex:
+            _LOGGER.warning("Error stopping hub during unload: %s", ex)
+    else:
+        _LOGGER.warning("Failed to unload platforms for entry: %s", entry.entry_id)
     
     return unload_ok
 
 
-@callback
-def get_hub(hass: HomeAssistant) -> SunPowerWSHub | None:
-    return hass.data.get(DOMAIN)
+# Removed get_hub() - sensors should access hub via entry.runtime_data directly
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

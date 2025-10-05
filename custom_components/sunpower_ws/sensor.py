@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Optional, Set
 
@@ -20,39 +21,42 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from . import DOMAIN, get_hub, SunPowerWSHub
+from . import DOMAIN, SunPowerWSHub
+
+_LOGGER = logging.getLogger(__name__)
 
 # Primary power sensors in kW
 KW_SENSORS = {
-    "pv_kw":   ("sunpower_pv_power_kw",   "PV Power",   UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
-    "load_kw": ("sunpower_home_load_kw",  "Home Load",  UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
-    "net_kw":  ("sunpower_grid_net_kw",   "Grid Net",   UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
+    "pv_kw":   ("pv_power_kw",   "PV power",   UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
+    "load_kw": ("home_load_kw",  "Home load",  UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
+    "net_kw":  ("grid_net_kw",   "Grid net",   UnitOfPower.KILO_WATT, SensorDeviceClass.POWER),
 }
 
 # Legacy W sensors (optionally enabled via Options)
 W_SENSORS = {
-    "solar_w": ("sunpower_pv_production", "PV Production", UnitOfPower.WATT, SensorDeviceClass.POWER),
-    "load_w":  ("sunpower_home_load",     "Home Load",     UnitOfPower.WATT, SensorDeviceClass.POWER),
-    "net_w":   ("sunpower_grid_net",      "Grid Net",      UnitOfPower.WATT, SensorDeviceClass.POWER),
+    "solar_w": ("pv_production", "PV production", UnitOfPower.WATT, SensorDeviceClass.POWER),
+    "load_w":  ("home_load",     "Home load",     UnitOfPower.WATT, SensorDeviceClass.POWER),
+    "net_w":   ("grid_net",      "Grid net",      UnitOfPower.WATT, SensorDeviceClass.POWER),
 }
 
 # Lifetime energy direct from WS (kWh)
 WS_LIFETIME_SENSORS = [
-    ("pv_en_kwh", "sunpower_pv_lifetime_kwh",         "PV Lifetime Energy",         SensorStateClass.TOTAL_INCREASING),
-    ("site_load_en_kwh", "sunpower_home_load_lifetime_kwh", "Home Load Lifetime Energy", SensorStateClass.TOTAL_INCREASING),
-    ("net_en_kwh", "sunpower_grid_net_lifetime_kwh",  "Grid Net Lifetime Energy",   SensorStateClass.TOTAL),  # informational only
+    ("pv_en_kwh", "pv_lifetime_kwh",         "PV lifetime energy",         SensorStateClass.TOTAL_INCREASING),
+    ("site_load_en_kwh", "home_load_lifetime_kwh", "Home load lifetime energy", SensorStateClass.TOTAL_INCREASING),
+    ("net_en_kwh", "grid_net_lifetime_kwh",  "Grid net lifetime energy",   SensorStateClass.TOTAL),  # informational only
 ]
 
 DERIVED_ENERGY = [
-    ("pv_kw",   "sunpower_pv_energy_kwh",        "PV Energy (derived)"),
-    ("load_kw", "sunpower_home_load_energy_kwh", "Home Load Energy (derived)"),
+    ("pv_kw",   "pv_energy_kwh",        "PV energy (derived)"),
+    ("load_kw", "home_load_energy_kwh", "Home load energy (derived)"),
 ]
 
 
 class ConnectionStatusSensor(SensorEntity):
     """Sensor to show WebSocket connection status."""
     _attr_should_poll = False
-    _attr_name = "WebSocket Connection"
+    _attr_has_entity_name = True
+    _attr_name = "Connection"
     _attr_unique_id = f"{DOMAIN}_websocket_connection"
     _attr_icon = "mdi:wifi"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -135,7 +139,8 @@ class ConnectionStatusSensor(SensorEntity):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
-    hub: SunPowerWSHub = get_hub(hass)
+    """Set up SunPower sensors from a config entry."""
+    hub: SunPowerWSHub = entry.runtime_data
     entities: list[SensorEntity] = []
 
     # Connection status sensor (always enabled)
@@ -173,6 +178,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
 
 class GenericLiveSensor(SensorEntity):
     _attr_should_poll = False
+    _attr_has_entity_name = True
 
     def __init__(self, hub: SunPowerWSHub, key: str, unique_id: str, name: str, uom, device_class: Optional[SensorDeviceClass], enabled_by_default: bool):
         self._hub = hub
@@ -181,6 +187,7 @@ class GenericLiveSensor(SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{unique_id}"
         self._attr_native_unit_of_measurement = uom
         self._attr_device_class = device_class
+        self._attr_state_class = SensorStateClass.MEASUREMENT if device_class == SensorDeviceClass.POWER else None
         self._attr_native_value = None
         self._attr_entity_registry_enabled_default = enabled_by_default
         self._last_publish_ts: float = 0.0
@@ -211,14 +218,16 @@ class GenericLiveSensor(SensorEntity):
 
 class GridSplitPowerSensor(SensorEntity):
     _attr_should_poll = False
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
 
     def __init__(self, hub: SunPowerWSHub, mode: str):
         assert mode in ("import", "export")
         self._hub = hub
         self._mode = mode
-        self._attr_name = f"Grid {'Import' if mode=='import' else 'Export'} (kW)"
+        self._attr_name = f"Grid {'import' if mode=='import' else 'export'}"
         self._attr_unique_id = f"{DOMAIN}_grid_{mode}_kw"
         self._attr_native_value = 0.0
         self._last_publish_ts: float = 0.0
@@ -253,6 +262,7 @@ class GridSplitPowerSensor(SensorEntity):
 
 class LifetimeFromWSSensor(SensorEntity):
     _attr_should_poll = False
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
@@ -286,6 +296,7 @@ class LifetimeFromWSSensor(SensorEntity):
 
 class IntegratingEnergySensor(RestoreEntity, SensorEntity):
     _attr_should_poll = False
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -344,7 +355,7 @@ class IntegratingEnergySensor(RestoreEntity, SensorEntity):
 class GridSplitEnergySensor(IntegratingEnergySensor):
     def __init__(self, hub: SunPowerWSHub, mode: str):
         assert mode in ("import", "export")
-        name = f"Grid {'Import' if mode=='import' else 'Export'} Energy"
+        name = f"Grid {'import' if mode=='import' else 'export'} energy"
         uid = f"grid_{mode}_energy_kwh"
         super().__init__(hub, "net_kw", uid, name)
         self._mode = mode
