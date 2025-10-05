@@ -140,26 +140,25 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
         
         if user_input is not None:
             try:
-                options = {}
-                # Copy existing options first
-                for key, value in current.items():
-                    if key not in ["host", "port", "enable_w_sensors", 
-                                "consumption_measure", "enable_ws_throttle", "ws_update_interval"]:
-                        options[key] = value
-                        
-                # Update with new values
-                # Note: Unchecked checkboxes don't appear in user_input, so we check with "in" operator
-                options.update({
-                    "host": user_input.get("host", current.get("host")),
-                    "port": int(user_input.get("port", current.get("port", DEFAULT_PORT))),
-                    "enable_w_sensors": user_input.get("enable_w_sensors", False),  # False if not in user_input
-                    "consumption_measure": user_input.get("consumption_measure", current.get("consumption_measure", "house_usage")),
-                    "enable_ws_throttle": user_input.get("enable_ws_throttle", False),  # False if not in user_input
-                    "ws_update_interval": max(1, int(user_input.get("ws_update_interval", current.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL)))),
-                })
+                # Update data (not options) to match reconfigure flow behavior
+                # Note: Unchecked checkboxes don't appear in user_input
+                data_updates = {
+                    "host": user_input["host"],
+                    "port": user_input["port"],
+                    "enable_w_sensors": user_input.get("enable_w_sensors", False),  # False if unchecked
+                    "consumption_measure": user_input["consumption_measure"],
+                    "enable_ws_throttle": user_input.get("enable_ws_throttle", False),  # False if unchecked
+                    "ws_update_interval": user_input["ws_update_interval"],
+                }
+                
+                _LOGGER.debug("Options flow: Updating config entry with data: %s", data_updates)
                     
-                # Update the entry with new options
-                self.hass.config_entries.async_update_entry(self.config_entry, data={}, options=options)
+                # Update data and clear options (same as reconfigure flow)
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, 
+                    data=data_updates, 
+                    options={}  # Clear options so data takes precedence
+                )
                 return self.async_create_entry(title="", data={})
             except Exception as ex:
                 errors["base"] = "unknown"
