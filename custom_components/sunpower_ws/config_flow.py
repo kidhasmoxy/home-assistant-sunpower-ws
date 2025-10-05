@@ -159,6 +159,10 @@ class SunPowerWSOptionsFlowHandler(config_entries.OptionsFlow):
                     data=data_updates, 
                     options={}  # Clear options so data takes precedence
                 )
+                
+                # Trigger reload to apply changes
+                await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                
                 return self.async_create_entry(title="", data={})
             except Exception as ex:
                 errors["base"] = "unknown"
