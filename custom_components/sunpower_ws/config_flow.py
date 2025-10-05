@@ -71,22 +71,22 @@ class SunPowerWSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         if user_input is not None:
             # Process the user input and update the config entry
-            # Note: Unchecked checkboxes don't appear in user_input, so default to False
-            new_data = {
-                "host": user_input.get("host", DEFAULT_HOST),
-                "port": user_input.get("port", DEFAULT_PORT),
-                "consumption_measure": user_input.get("consumption_measure", "house_usage"),
-                "ws_update_interval": user_input.get("ws_update_interval", DEFAULT_WS_UPDATE_INTERVAL),
+            # Note: Unchecked checkboxes don't appear in user_input, so we need to explicitly set them
+            data_updates = {
+                "host": user_input["host"],
+                "port": user_input["port"],
+                "consumption_measure": user_input["consumption_measure"],
+                "ws_update_interval": user_input["ws_update_interval"],
                 "enable_ws_throttle": user_input.get("enable_ws_throttle", False),  # False if unchecked
                 "enable_w_sensors": user_input.get("enable_w_sensors", False),  # False if unchecked
             }
             
-            _LOGGER.debug("Reconfigure: Updating config entry with new data: %s", new_data)
+            _LOGGER.debug("Reconfigure: Updating config entry with data: %s", data_updates)
             
             # Update the config entry and reload
             return self.async_update_reload_and_abort(
                 reconfigure_entry,
-                data_updates=new_data,
+                data_updates=data_updates,
                 reload_even_if_entry_is_unchanged=True,
             )
         

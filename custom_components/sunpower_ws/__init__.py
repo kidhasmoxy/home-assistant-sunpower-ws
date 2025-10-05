@@ -302,6 +302,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     try:
         # Get configuration from entry data and options
+        _LOGGER.debug("Entry data: %s", entry.data)
+        _LOGGER.debug("Entry options: %s", entry.options)
+        
         cfg = {**entry.data, **entry.options}
         host = cfg.get("host", DEFAULT_HOST)
         port = cfg.get("port", DEFAULT_PORT)
@@ -309,8 +312,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         consumption_measure = cfg.get("consumption_measure", "house_usage")
         enable_ws_throttle = cfg.get("enable_ws_throttle", True)
         
-        _LOGGER.debug(
-            "Configuration: host=%s, port=%s, ws_update_interval=%s, consumption_measure=%s, enable_ws_throttle=%s",
+        _LOGGER.info(
+            "Configuration loaded: host=%s, port=%s, ws_update_interval=%s, consumption_measure=%s, enable_ws_throttle=%s",
             host, port, ws_update_interval, consumption_measure, enable_ws_throttle
         )
         
